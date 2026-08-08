@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transmitter — Air-Gapped Audio Transfer</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <header class="hero" style="padding: 1.5rem 1rem;">
+            <h1 style="font-size: 1.5rem;">📡 Transmitter</h1>
+            <a href="/" style="color: var(--text-muted); font-size: 0.85rem;">← Back to Home</a>
+        </header>
+
+        <div class="dashboard">
+            <!-- Left Panel: File & Settings -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📁 File Selection</span>
+                </div>
+
+                <div class="file-drop-zone" id="fileDropZone">
+                    <div class="file-drop-icon">📤</div>
+                    <div class="file-drop-text">Drop a file here or click to select</div>
+                    <div class="file-drop-hint">Any file type supported</div>
+                    <input type="file" id="fileInput" style="display: none;">
+                </div>
+
+                <div class="file-info" id="fileInfo">
+                    <div class="file-name" id="fileName"></div>
+                    <div class="file-meta">
+                        <span><span class="label">Size</span> <span id="fileSize"></span></span>
+                        <span><span class="label">Hash</span> <span id="fileHash" style="font-family: var(--font-mono); font-size: 0.75rem;"></span></span>
+                        <span><span class="label">Est. Time</span> <span id="estTime"></span></span>
+                    </div>
+                </div>
+
+                <div class="setting-group" style="margin-top: 1.5rem;">
+                    <div class="setting-group-title">Audio Settings</div>
+                    <div class="setting-row">
+                        <span class="setting-label">Output Device</span>
+                        <select class="setting-select" id="outputDevice">
+                            <option>Loading...</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Sample Rate</span>
+                        <span class="setting-value" id="sampleRate">48,000 Hz</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Modulation</span>
+                        <span class="setting-value" id="modulation">4-FSK</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Symbol Rate</span>
+                        <select class="setting-select" id="symbolRate">
+                            <option value="150">150 baud (Reliable)</option>
+                            <option value="250" selected>250 baud (Balanced)</option>
+                            <option value="500">500 baud (Fast)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">FEC Overhead</span>
+                        <select class="setting-select" id="fecOverhead">
+                            <option value="0.10">10% (Minimal)</option>
+                            <option value="0.20">20% (Low)</option>
+                            <option value="0.25" selected>25% (Default)</option>
+                            <option value="0.30">30% (Medium)</option>
+                            <option value="0.40">40% (High)</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Encryption</span>
+                        <select class="setting-select" id="encryption">
+                            <option value="none">None</option>
+                            <option value="chacha20-poly1305" selected>ChaCha20-Poly1305</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Compression</span>
+                        <select class="setting-select" id="compression">
+                            <option value="zstd" selected>Zstandard</option>
+                            <option value="gzip">Gzip</option>
+                            <option value="none">None</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel: Progress -->
+            <div class="panel" id="centerPanel">
+                <div class="progress-section" id="idleSection">
+                    <div class="progress-title">Ready to Transmit</div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+                        Select a file and configure settings, then start transmission.
+                    </p>
+                    <div style="display: flex; gap: 1rem; justify-content: center;">
+                        <button class="btn btn-primary" id="calibrateBtn" onclick="startCalibration()">
+                            🔧 Run Calibration
+                        </button>
+                        <button class="btn btn-success" id="startBtn" onclick="startTransfer()" disabled>
+                            📡 Start Transmission
+                        </button>
+                    </div>
+                </div>
+
+                <div class="progress-section" id="transmittingSection" style="display: none;">
+                    <div class="progress-title">TRANSMITTING</div>
+                    <div class="progress-percentage" id="progressPercent">0%</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-details">
+                        <div class="progress-stat">
+                            <div class="stat-label">Data Sent</div>
+                            <div class="stat-value" id="dataSent">0 B</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">Speed</div>
+                            <div class="stat-value" id="speed">0 B/s</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">Remaining</div>
+                            <div class="stat-value" id="remaining">--</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 1.5rem;">
+                        <button class="btn btn-danger" onclick="cancelTransfer()">⏹ Cancel</button>
+                    </div>
+                </div>
+
+                <div class="progress-section" id="completeSection" style="display: none;">
+                    <div class="complete-icon">✅</div>
+                    <div class="complete-title">Transmission Complete</div>
+                    <div class="complete-file" id="completeFile"></div>
+                    <div class="complete-checks">
+                        <div class="complete-check">
+                            <span class="check-icon">✓</span> All frames transmitted
+                        </div>
+                        <div class="complete-check">
+                            <span class="check-icon">✓</span> File hash verified
+                        </div>
+                        <div class="complete-check">
+                            <span class="check-icon">✓</span> Transfer logged
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="resetTransfer()">🔄 New Transfer</button>
+                </div>
+
+                <!-- Calibration Result -->
+                <div id="calibrationSection" style="display: none;">
+                    <div class="calibration-result">
+                        <h3 style="margin-bottom: 1rem; text-align: center;">Calibration Result</h3>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Signal Detected</span>
+                            <span class="calibration-value" id="calSignal">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">SNR</span>
+                            <span class="calibration-value" id="calSNR">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Clipping</span>
+                            <span class="calibration-value" id="calClipping">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Noise Floor</span>
+                            <span class="calibration-value" id="calNoise">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Frequency Confidence</span>
+                            <span class="calibration-value" id="calConfidence">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Recommended Profile</span>
+                            <span class="calibration-value" id="calProfile">—</span>
+                        </div>
+                        <div style="margin-top: 1rem; text-align: center;">
+                            <button class="btn btn-success" onclick="startTransfer()">📡 Start Transmission</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Visualization & Log -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📊 Visualization</span>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Waveform</div>
+                    <canvas class="viz-canvas" id="waveformCanvas"></canvas>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Frequency Spectrum</div>
+                    <canvas class="viz-canvas" id="spectrumCanvas"></canvas>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Output Level</div>
+                    <div class="signal-meter">
+                        <div class="signal-bars" id="signalBars">
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-header" style="margin-top: 1rem;">
+                    <span class="panel-title">📋 Log</span>
+                    <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="exportLog()">Export</button>
+                </div>
+
+                <div class="log-container" id="logContainer">
+                    <div class="log-entry">
+                        <span class="log-timestamp">--:--:--</span>
+                        <span class="log-message">Waiting for transmission...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        // Initialize
+        let ws = null;
+        let selectedFile = null;
+        let transferActive = false;
+
+        // File selection
+        const fileDropZone = document.getElementById('fileDropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        fileDropZone.addEventListener('click', () => fileInput.click());
+
+        fileDropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileDropZone.classList.add('dragover');
+        });
+
+        fileDropZone.addEventListener('dragleave', () => {
+            fileDropZone.classList.remove('dragover');
+        });
+
+        fileDropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileDropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            selectedFile = file;
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = formatSize(file.size);
+            document.getElementById('fileHash').textContent = 'Computing...';
+            document.getElementById('fileInfo').classList.add('visible');
+            document.getElementById('startBtn').disabled = false;
+
+            // Estimate transfer time
+            const symbolRate = parseInt(document.getElementById('symbolRate').value);
+            const bitsPerSymbol = 2;
+            const byteRate = (symbolRate * bitsPerSymbol) / 8;
+            const overhead = 1 + parseFloat(document.getElementById('fecOverhead').value);
+            const effectiveRate = byteRate / overhead;
+            const estSeconds = file.size / effectiveRate;
+            document.getElementById('estTime').textContent = formatTime(estSeconds);
+
+            // Compute hash using server
+            const formData = new FormData();
+            formData.append('file', file);
+            fetch('/api/file/upload', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('fileHash').textContent = data.hash;
+                });
+        }
+
+        function startCalibration() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket(() => startCalibration());
+                return;
+            }
+
+            addLog('Starting calibration...');
+            document.getElementById('calibrateBtn').disabled = true;
+
+            ws.send(JSON.stringify({ action: 'start_calibration' }));
+        }
+
+        function startTransfer() {
+            if (!selectedFile) {
+                alert('Please select a file first');
+                return;
+            }
+
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket(() => startTransfer());
+                return;
+            }
+
+            transferActive = true;
+            document.getElementById('idleSection').style.display = 'none';
+            document.getElementById('calibrationSection').style.display = 'none';
+            document.getElementById('transmittingSection').style.display = 'block';
+
+            addLog('Starting transmission...');
+            ws.send(JSON.stringify({ action: 'start_transfer' }));
+        }
+
+        function cancelTransfer() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'cancel_transfer' }));
+            }
+            resetTransfer();
+        }
+
+        function resetTransfer() {
+            transferActive = false;
+            document.getElementById('idleSection').style.display = 'block';
+            document.getElementById('transmittingSection').style.display = 'none';
+            document.getElementById('completeSection').style.display = 'none';
+            document.getElementById('calibrationSection').style.display = 'none';
+        }
+
+        function connectWebSocket(onOpen) {
+            ws = new WebSocket(`ws://${window.location.host}/ws/control`);
+
+            ws.onopen = () => {
+                addLog('Connected to backend');
+                if (onOpen) onOpen();
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                addLog('Disconnected from backend');
+            };
+
+            ws.onerror = (err) => {
+                addLog('WebSocket error', 'ERROR');
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'progress':
+                    updateProgress(msg);
+                    break;
+                case 'calibration_complete':
+                    showCalibrationResult(msg.result);
+                    break;
+                case 'transfer_complete':
+                    showComplete(msg);
+                    break;
+                case 'transfer_cancelled':
+                    resetTransfer();
+                    break;
+                case 'error':
+                    addLog('Error: ' + msg.message, 'ERROR');
+                    break;
+                case 'level':
+                    updateSignalMeter(msg.level_db);
+                    break;
+            }
+        }
+
+        function updateProgress(msg) {
+            const percent = (msg.progress * 100).toFixed(1);
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('dataSent').textContent = formatSize(msg.bytes_sent || 0);
+            document.getElementById('speed').textContent = formatSpeed(msg.speed_bps || 0);
+            document.getElementById('remaining').textContent = msg.estimated_remaining ?
+                formatTime(msg.estimated_remaining) : '--';
+        }
+
+        function showCalibrationResult(result) {
+            document.getElementById('calibrateBtn').disabled = false;
+            document.getElementById('calibrationSection').style.display = 'block';
+
+            document.getElementById('calSignal').textContent = '✓ Detected';
+            document.getElementById('calSignal').className = 'calibration-value good';
+
+            document.getElementById('calSNR').textContent = result.snr_db + ' dB';
+            document.getElementById('calSNR').className = 'calibration-value ' +
+                (result.snr_db > 20 ? 'good' : result.snr_db > 10 ? 'warning' : 'danger');
+
+            document.getElementById('calClipping').textContent = result.clipping ? 'Yes' : 'None';
+            document.getElementById('calClipping').className = 'calibration-value ' +
+                (result.clipping ? 'danger' : 'good');
+
+            document.getElementById('calNoise').textContent = result.noise_floor_db + ' dB';
+
+            document.getElementById('calConfidence').textContent =
+                (result.frequency_confidence * 100).toFixed(1) + '%';
+            document.getElementById('calConfidence').className = 'calibration-value ' +
+                (result.frequency_confidence > 0.8 ? 'good' : 'warning');
+
+            document.getElementById('calProfile').textContent =
+                result.recommended_profile.toUpperCase() + ' (' +
+                result.recommended_symbol_rate + ' baud / ' +
+                (result.recommended_fec_overhead * 100).toFixed(0) + '% FEC)';
+
+            addLog('Calibration complete: SNR=' + result.snr_db + 'dB, Quality=' + result.quality);
+        }
+
+        function showComplete(msg) {
+            transferActive = false;
+            document.getElementById('transmittingSection').style.display = 'none';
+            document.getElementById('completeSection').style.display = 'block';
+            document.getElementById('completeFile').textContent = selectedFile ? selectedFile.name : '';
+            addLog('Transfer complete');
+        }
+
+        function updateSignalMeter(levelDb) {
+            const normalized = Math.max(0, Math.min(1, (levelDb + 60) / 60));
+            const bars = document.querySelectorAll('#signalBars .signal-bar');
+            const activeBars = Math.round(normalized * bars.length);
+
+            bars.forEach((bar, i) => {
+                bar.classList.remove('active', 'warning', 'danger');
+                if (i < activeBars) {
+                    if (normalized > 0.9) bar.classList.add('danger');
+                    else if (normalized > 0.7) bar.classList.add('warning');
+                    else bar.classList.add('active');
+                }
+            });
+        }
+
+        // Visualizations
+        function drawWaveform() {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            ctx.fillStyle = '#0a0e17';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw animated waveform
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            const time = Date.now() / 1000;
+            for (let x = 0; x < canvas.width; x++) {
+                const y = canvas.height / 2 +
+                    Math.sin(x * 0.05 + time * 3) * 20 +
+                    Math.sin(x * 0.02 + time * 1.5) * 10;
+                if (x === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            requestAnimationFrame(drawWaveform);
+        }
+
+        function drawSpectrum() {
+            const canvas = document.getElementById('spectrumCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            ctx.fillStyle = '#0a0e17';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw animated spectrum bars
+            const barCount = 32;
+            const barWidth = canvas.width / barCount - 2;
+            const time = Date.now() / 1000;
+
+            for (let i = 0; i < barCount; i++) {
+                const height = (Math.sin(i * 0.3 + time * 2) + 1) * 0.3 *
+                    canvas.height * (0.3 + Math.random() * 0.1);
+
+                const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - height);
+                gradient.addColorStop(0, '#3b82f6');
+                gradient.addColorStop(1, '#8b5cf6');
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(
+                    i * (barWidth + 2),
+                    canvas.height - height,
+                    barWidth,
+                    height
+                );
+            }
+
+            requestAnimationFrame(drawSpectrum);
+        }
+
+        // Initialize visualizations
+        drawWaveform();
+        drawSpectrum();
+
+        // Auto-poll signal level
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'get_level' }));
+            }
+        }, 500);
+
+        // Connect on load
+        connectWebSocket();
+    </script>
+</body>
+</html>

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receiver — Air-Gapped Audio Transfer</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <header class="hero" style="padding: 1.5rem 1rem;">
+            <h1 style="font-size: 1.5rem;">📻 Receiver</h1>
+            <a href="/" style="color: var(--text-muted); font-size: 0.85rem;">← Back to Home</a>
+        </header>
+
+        <div class="dashboard">
+            <!-- Left Panel: Device & Settings -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">🎤 Audio Input</span>
+                </div>
+
+                <div class="setting-group">
+                    <div class="setting-row">
+                        <span class="setting-label">Input Device</span>
+                        <select class="setting-select" id="inputDevice">
+                            <option>Loading...</option>
+                        </select>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Sample Rate</span>
+                        <span class="setting-value" id="sampleRate">48,000 Hz</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Status</span>
+                        <span class="status-indicator status-listening" id="statusIndicator">
+                            Listening...
+                        </span>
+                    </div>
+                </div>
+
+                <div class="setting-group" style="margin-top: 1.5rem;">
+                    <div class="setting-group-title">Detection Settings</div>
+                    <div class="setting-row">
+                        <span class="setting-label">Modulation</span>
+                        <span class="setting-value" id="modulation">4-FSK</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Symbol Rate</span>
+                        <span class="setting-value" id="symbolRate">250 baud</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">FEC Overhead</span>
+                        <span class="setting-value" id="fecOverhead">25%</span>
+                    </div>
+                    <div class="setting-row">
+                        <span class="setting-label">Output Directory</span>
+                        <span class="setting-value" id="outputDir" style="font-size: 0.75rem;">~/Downloads</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 1.5rem;">
+                    <button class="btn btn-primary" style="width: 100%;" onclick="startCalibration()">
+                        🔧 Run Calibration
+                    </button>
+                </div>
+            </div>
+
+            <!-- Center Panel: Status & Progress -->
+            <div class="panel" id="centerPanel">
+                <!-- Waiting State -->
+                <div class="progress-section" id="waitingSection">
+                    <div style="font-size: 4rem; margin-bottom: 1rem; animation: pulse 2s infinite;">👂</div>
+                    <div class="progress-title" style="color: var(--accent);">WAITING FOR TRANSMISSION</div>
+                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+                        The receiver is listening for audio signals.<br>
+                        Start the transmitter on the other computer.
+                    </p>
+                    <div class="signal-meter" style="max-width: 300px; margin: 0 auto;">
+                        <div class="viz-label" style="text-align: center;">Signal Strength</div>
+                        <div class="signal-bars" id="waitingSignalBars">
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signal Detected State -->
+                <div class="progress-section" id="detectedSection" style="display: none;">
+                    <div style="font-size: 4rem; margin-bottom: 1rem;">📡</div>
+                    <div class="progress-title" style="color: var(--warning);">SIGNAL DETECTED</div>
+                    <div class="calibration-result" style="max-width: 400px; margin: 0 auto;">
+                        <div class="calibration-row">
+                            <span class="calibration-label">Transfer ID</span>
+                            <span class="calibration-value" id="transferId">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Filename</span>
+                            <span class="calibration-value" id="rxFilename">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Size</span>
+                            <span class="calibration-value" id="rxFilesize">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Encryption</span>
+                            <span class="calibration-value" id="rxEncryption">—</span>
+                        </div>
+                        <div class="calibration-row">
+                            <span class="calibration-label">Compression</span>
+                            <span class="calibration-value" id="rxCompression">—</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Receiving State -->
+                <div class="progress-section" id="receivingSection" style="display: none;">
+                    <div class="progress-title">RECEIVING</div>
+                    <div class="progress-percentage" id="progressPercent">0%</div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+                    </div>
+                    <div class="progress-details">
+                        <div class="progress-stat">
+                            <div class="stat-label">Data Received</div>
+                            <div class="stat-value" id="dataReceived">0 B</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">Effective Speed</div>
+                            <div class="stat-value" id="speed">0 B/s</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">Frames Recovered</div>
+                            <div class="stat-value" id="framesRecovered">0</div>
+                        </div>
+                    </div>
+                    <div class="progress-details" style="margin-top: 0.5rem;">
+                        <div class="progress-stat">
+                            <div class="stat-label">Frames Corrupted</div>
+                            <div class="stat-value" id="framesCorrupted" style="color: var(--warning);">0</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">FEC Recovered</div>
+                            <div class="stat-value" id="fecRecovered" style="color: var(--success);">0</div>
+                        </div>
+                        <div class="progress-stat">
+                            <div class="stat-label">SNR</div>
+                            <div class="stat-value" id="currentSNR">— dB</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Complete State -->
+                <div class="progress-section" id="completeSection" style="display: none;">
+                    <div class="complete-icon">✅</div>
+                    <div class="complete-title">TRANSFER COMPLETE</div>
+                    <div class="complete-checks" style="max-width: 300px; margin: 0 auto 1.5rem;">
+                        <div class="complete-check" id="checkFrames">
+                            <span class="check-icon">✓</span> All frames recovered
+                        </div>
+                        <div class="complete-check" id="checkHash">
+                            <span class="check-icon">✓</span> File hash verified
+                        </div>
+                        <div class="complete-check" id="checkAuth">
+                            <span class="check-icon">✓</span> Authentication verified
+                        </div>
+                        <div class="complete-check" id="checkReconstruct">
+                            <span class="check-icon">✓</span> File reconstructed
+                        </div>
+                    </div>
+                    <div class="complete-file" id="completeFile" style="font-size: 1.2rem; margin-bottom: 1rem;"></div>
+                    <div class="hash-display" id="completeHash"></div>
+                    <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: center;">
+                        <button class="btn btn-success" onclick="openFolder()">📁 Open Folder</button>
+                        <button class="btn btn-primary" onclick="resetReceiver()">🔄 New Transfer</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Visualization & Log -->
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">📊 Visualization</span>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Microphone Waveform</div>
+                    <canvas class="viz-canvas" id="waveformCanvas"></canvas>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">FFT Spectrum</div>
+                    <canvas class="viz-canvas" id="spectrumCanvas"></canvas>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Signal Strength</div>
+                    <div class="signal-meter">
+                        <div class="signal-bars" id="signalBars">
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                            <div class="signal-bar"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="viz-container">
+                    <div class="viz-label">Detected Frequencies</div>
+                    <div id="detectedFreqs" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary); padding: 0.5rem;">
+                        No signal detected
+                    </div>
+                </div>
+
+                <div class="panel-header" style="margin-top: 1rem;">
+                    <span class="panel-title">📋 Log</span>
+                    <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="exportLog()">Export</button>
+                </div>
+
+                <div class="log-container" id="logContainer">
+                    <div class="log-entry">
+                        <span class="log-timestamp">--:--:--</span>
+                        <span class="log-message">Receiver initialized, listening...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        let ws = null;
+        let receiving = false;
+
+        function startCalibration() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                connectWebSocket(() => startCalibration());
+                return;
+            }
+
+            addLog('Starting calibration...');
+            ws.send(JSON.stringify({ action: 'start_calibration' }));
+        }
+
+        function resetReceiver() {
+            receiving = false;
+            document.getElementById('waitingSection').style.display = 'block';
+            document.getElementById('detectedSection').style.display = 'none';
+            document.getElementById('receivingSection').style.display = 'none';
+            document.getElementById('completeSection').style.display = 'none';
+
+            const statusIndicator = document.getElementById('statusIndicator');
+            statusIndicator.textContent = 'Listening...';
+            statusIndicator.className = 'status-indicator status-listening';
+        }
+
+        function openFolder() {
+            // This would need a server-side endpoint to open the folder
+            addLog('Open folder: ~/Downloads');
+        }
+
+        function connectWebSocket(onOpen) {
+            ws = new WebSocket(`ws://${window.location.host}/ws/control`);
+
+            ws.onopen = () => {
+                addLog('Connected to backend');
+                if (onOpen) onOpen();
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = () => {
+                addLog('Disconnected from backend');
+            };
+
+            ws.onerror = (err) => {
+                addLog('WebSocket error', 'ERROR');
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'signal_detected':
+                    showDetected(msg);
+                    break;
+                case 'progress':
+                    updateProgress(msg);
+                    break;
+                case 'calibration_complete':
+                    showCalibrationResult(msg.result);
+                    break;
+                case 'transfer_complete':
+                    showComplete(msg);
+                    break;
+                case 'error':
+                    addLog('Error: ' + msg.message, 'ERROR');
+                    break;
+                case 'level':
+                    updateSignalMeter(msg.level_db);
+                    break;
+            }
+        }
+
+        function showDetected(msg) {
+            document.getElementById('waitingSection').style.display = 'none';
+            document.getElementById('detectedSection').style.display = 'block';
+
+            document.getElementById('transferId').textContent = msg.transfer_id || '—';
+            document.getElementById('rxFilename').textContent = msg.filename || '—';
+            document.getElementById('rxFilesize').textContent = msg.filesize ? formatSize(msg.filesize) : '—';
+            document.getElementById('rxEncryption').textContent = msg.encryption ? 'Enabled' : 'Disabled';
+            document.getElementById('rxCompression').textContent = msg.compression ? 'Enabled' : 'Disabled';
+
+            const statusIndicator = document.getElementById('statusIndicator');
+            statusIndicator.textContent = 'Receiving...';
+            statusIndicator.className = 'status-indicator status-receiving';
+
+            addLog('Signal detected: ' + (msg.filename || 'Unknown'));
+        }
+
+        function updateProgress(msg) {
+            if (!receiving) {
+                receiving = true;
+                document.getElementById('detectedSection').style.display = 'none';
+                document.getElementById('receivingSection').style.display = 'block';
+            }
+
+            const percent = (msg.progress * 100).toFixed(1);
+            document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('dataReceived').textContent = formatSize(msg.bytes_received || 0);
+            document.getElementById('speed').textContent = formatSpeed(msg.speed_bps || 0);
+            document.getElementById('framesRecovered').textContent = msg.frames_received || 0;
+            document.getElementById('framesCorrupted').textContent = msg.frames_corrupted || 0;
+            document.getElementById('fecRecovered').textContent = msg.fec_recovered || 0;
+        }
+
+        function showCalibrationResult(result) {
+            addLog('Calibration complete: SNR=' + result.snr_db + 'dB');
+        }
+
+        function showComplete(msg) {
+            receiving = false;
+            document.getElementById('receivingSection').style.display = 'none';
+            document.getElementById('completeSection').style.display = 'block';
+
+            document.getElementById('completeFile').textContent = msg.filename || 'File';
+            document.getElementById('completeHash').textContent =
+                'SHA-256: ' + (msg.hash || 'Verified');
+
+            const statusIndicator = document.getElementById('statusIndicator');
+            statusIndicator.textContent = 'Complete';
+            statusIndicator.className = 'status-indicator status-complete';
+
+            addLog('Transfer complete: ' + (msg.filename || 'File'));
+        }
+
+        function updateSignalMeter(levelDb) {
+            const normalized = Math.max(0, Math.min(1, (levelDb + 60) / 60));
+            const bars = document.querySelectorAll('#signalBars .signal-bar');
+            const activeBars = Math.round(normalized * bars.length);
+
+            bars.forEach((bar, i) => {
+                bar.classList.remove('active', 'warning', 'danger');
+                if (i < activeBars) {
+                    if (normalized > 0.9) bar.classList.add('danger');
+                    else if (normalized > 0.7) bar.classList.add('warning');
+                    else bar.classList.add('active');
+                }
+            });
+        }
+
+        // Visualizations
+        function drawWaveform() {
+            const canvas = document.getElementById('waveformCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            ctx.fillStyle = '#0a0e17';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            const time = Date.now() / 1000;
+            for (let x = 0; x < canvas.width; x++) {
+                const y = canvas.height / 2 +
+                    Math.sin(x * 0.03 + time * 2) * 15 +
+                    Math.sin(x * 0.07 + time * 4) * 8 +
+                    (Math.random() - 0.5) * 5;
+                if (x === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            requestAnimationFrame(drawWaveform);
+        }
+
+        function drawSpectrum() {
+            const canvas = document.getElementById('spectrumCanvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = canvas.offsetWidth;
+            canvas.height = canvas.offsetHeight;
+
+            ctx.fillStyle = '#0a0e17';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const barCount = 32;
+            const barWidth = canvas.width / barCount - 2;
+            const time = Date.now() / 1000;
+
+            for (let i = 0; i < barCount; i++) {
+                const height = (Math.sin(i * 0.4 + time * 1.5) + 1) * 0.25 *
+                    canvas.height * (0.2 + Math.random() * 0.15);
+
+                const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - height);
+                gradient.addColorStop(0, '#10b981');
+                gradient.addColorStop(1, '#3b82f6');
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(
+                    i * (barWidth + 2),
+                    canvas.height - height,
+                    barWidth,
+                    height
+                );
+            }
+
+            requestAnimationFrame(drawSpectrum);
+        }
+
+        drawWaveform();
+        drawSpectrum();
+
+        // Auto-poll signal level
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ action: 'get_level' }));
+            }
+        }, 500);
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

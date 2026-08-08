@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Air-Gapped Audio Transfer</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <header class="hero">
+            <div class="hero-icon">
+                <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+                    <circle cx="40" cy="40" r="38" stroke="var(--accent)" stroke-width="2" opacity="0.3"/>
+                    <circle cx="40" cy="40" r="28" stroke="var(--accent)" stroke-width="2" opacity="0.5"/>
+                    <circle cx="40" cy="40" r="18" stroke="var(--accent)" stroke-width="2" opacity="0.7"/>
+                    <circle cx="40" cy="40" r="8" fill="var(--accent)"/>
+                    <path d="M20 40 Q30 30, 40 40 Q50 50, 60 40" stroke="var(--accent)" stroke-width="2" fill="none"/>
+                    <path d="M20 35 Q30 25, 40 35 Q50 45, 60 35" stroke="var(--accent)" stroke-width="1.5" fill="none" opacity="0.5"/>
+                    <path d="M20 45 Q30 35, 40 45 Q50 55, 60 45" stroke="var(--accent)" stroke-width="1.5" fill="none" opacity="0.5"/>
+                </svg>
+            </div>
+            <h1>Air-Gapped Audio Transfer</h1>
+            <p class="subtitle">Transfer files between isolated computers using only sound</p>
+            <div class="security-badge">
+                <span class="badge-icon">🔒</span>
+                <span>100% Air-Gapped — No Network Required</span>
+            </div>
+        </header>
+
+        <div class="mode-selection">
+            <div class="mode-card" onclick="selectMode('transmitter')">
+                <div class="mode-icon">📡</div>
+                <h2>Transmitter</h2>
+                <p>Select a file and broadcast it through your speaker</p>
+                <div class="mode-features">
+                    <span>📤 File Selection</span>
+                    <span>🔊 Audio Output</span>
+                    <span>📊 Real-time Stats</span>
+                </div>
+                <button class="btn btn-primary">Configure Transmitter</button>
+            </div>
+
+            <div class="mode-divider">
+                <div class="divider-line"></div>
+                <span>OR</span>
+                <div class="divider-line"></div>
+            </div>
+
+            <div class="mode-card" onclick="selectMode('receiver')">
+                <div class="mode-icon">📻</div>
+                <h2>Receiver</h2>
+                <p>Listen with your microphone and reconstruct the file</p>
+                <div class="mode-features">
+                    <span>📥 File Reception</span>
+                    <span>🎤 Audio Input</span>
+                    <span>✅ Verification</span>
+                </div>
+                <button class="btn btn-secondary">Configure Receiver</button>
+            </div>
+        </div>
+
+        <div class="how-it-works">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>File → Audio</h3>
+                        <p>The transmitter encodes your file into audio frequencies using FSK modulation</p>
+                    </div>
+                </div>
+                <div class="step-arrow">→</div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Speaker → Air → Mic</h3>
+                        <p>Sound travels through the air — no network connection needed</p>
+                    </div>
+                </div>
+                <div class="step-arrow">→</div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Audio → File</h3>
+                        <p>The receiver demodulates the audio and reconstructs the original file</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="tech-stack">
+            <div class="tech-item">
+                <span class="tech-label">Encryption</span>
+                <span class="tech-value">ChaCha20-Poly1305</span>
+            </div>
+            <div class="tech-item">
+                <span class="tech-label">Error Correction</span>
+                <span class="tech-value">Reed-Solomon FEC</span>
+            </div>
+            <div class="tech-item">
+                <span class="tech-label">Modulation</span>
+                <span class="tech-value">4-FSK</span>
+            </div>
+            <div class="tech-item">
+                <span class="tech-label">Compression</span>
+                <span class="tech-value">Zstandard</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function selectMode(mode) {
+            fetch(`/api/mode/${mode}`, { method: 'POST' })
+                .then(() => {
+                    window.location.href = mode === 'receiver' ? '/receiver.html' : '/transmitter.html';
+                });
+        }
+    </script>
+</body>
+</html>

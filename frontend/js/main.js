@@ -1,5 +1,6 @@
 /**
  * Shared JavaScript utilities for the Air-Gapped Audio Transfer UI.
+ * Works standalone in the browser without a Python backend.
  */
 
 // --- Utility Functions ---
@@ -75,99 +76,25 @@ function exportLog() {
     URL.revokeObjectURL(url);
 }
 
-// --- Device Selection ---
-
-async function loadDevices() {
-    try {
-        const response = await fetch('/api/devices');
-        const data = await response.json();
-
-        const inputSelect = document.getElementById('inputDevice');
-        const outputSelect = document.getElementById('outputDevice');
-
-        if (inputSelect && data.input_devices) {
-            inputSelect.innerHTML = data.input_devices.map(d =>
-                `<option value="${d.index}" ${d.index === data.default_input ? 'selected' : ''}>${d.name}</option>`
-            ).join('');
-
-            inputSelect.addEventListener('change', async (e) => {
-                await fetch(`/api/devices/input/${e.target.value}`, { method: 'POST' });
-            });
-        }
-
-        if (outputSelect && data.output_devices) {
-            outputSelect.innerHTML = data.output_devices.map(d =>
-                `<option value="${d.index}" ${d.index === data.default_output ? 'selected' : ''}>${d.name}</option>`
-            ).join('');
-
-            outputSelect.addEventListener('change', async (e) => {
-                await fetch(`/api/devices/output/${e.target.value}`, { method: 'POST' });
-            });
-        }
-    } catch (err) {
-        console.error('Failed to load devices:', err);
-    }
-}
-
-// --- Configuration ---
-
-async function loadConfig() {
-    try {
-        const response = await fetch('/api/config');
-        const config = await response.json();
-
-        // Update UI elements
-        const symbolRateEl = document.getElementById('symbolRate');
-        const fecOverheadEl = document.getElementById('fecOverhead');
-        const encryptionEl = document.getElementById('encryption');
-        const compressionEl = document.getElementById('compression');
-
-        if (symbolRateEl) symbolRateEl.value = config.symbol_rate;
-        if (fecOverheadEl) fecOverheadEl.value = config.fec_overhead;
-        if (encryptionEl) encryptionEl.value = config.encryption_enabled ? 'chacha20-poly1305' : 'none';
-        if (compressionEl) compressionEl.value = config.compression_enabled ? 'zstd' : 'none';
-
-        return config;
-    } catch (err) {
-        console.error('Failed to load config:', err);
-        return null;
-    }
-}
-
-async function saveConfig(config) {
-    try {
-        await fetch('/api/config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-        });
-    } catch (err) {
-        console.error('Failed to save config:', err);
-    }
-}
-
 // --- Event Listeners ---
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Load devices
-    loadDevices();
+    // Display mode from URL or localStorage
+    const mode = localStorage.getItem('transferMode');
+    if (mode) {
+        console.log('Transfer mode:', mode);
+    }
 
-    // Load config
-    loadConfig();
-
-    // Auto-save config on change
-    const configInputs = ['symbolRate', 'fecOverhead', 'encryption', 'compression'];
-    configInputs.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('change', () => {
-                const config = {};
-                if (id === 'symbolRate') config.symbol_rate = parseInt(el.value);
-                if (id === 'fecOverhead') config.fec_overhead = parseFloat(el.value);
-                if (id === 'encryption') config.encryption_enabled = el.value !== 'none';
-                if (id === 'compression') config.compression_enabled = el.value !== 'none';
-                saveConfig(config);
-            });
+    // Update sample rate display
+    const sampleRateEl = document.getElementById('sampleRate');
+    if (sampleRateEl) {
+        // Try to get actual sample rate from Web Audio API
+        try {
+            const testContext = new (window.AudioContext || window.webkitAudioContext)();
+            sampleRateEl.textContent = testContext.sampleRate.toLocaleString() + ' Hz';
+            testContext.close();
+        } catch (e) {
+            sampleRateEl.textContent = '48,000 Hz';
         }
-    });
+    }
 });

@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Air-Gapped Audio Transfer</title>
-    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="css/main.css">
+    <meta name="description" content="Transfer files between isolated computers using only sound - 100% air-gapped">
+    <meta name="theme-color" content="#0a0e17">
 </head>
 <body>
     <div class="container">
@@ -92,29 +94,42 @@
         <div class="tech-stack">
             <div class="tech-item">
                 <span class="tech-label">Encryption</span>
-                <span class="tech-value">ChaCha20-Poly1305</span>
+                <span class="tech-value">AES-256-GCM</span>
             </div>
             <div class="tech-item">
                 <span class="tech-label">Error Correction</span>
-                <span class="tech-value">Reed-Solomon FEC</span>
+                <span class="tech-value">Parity FEC</span>
             </div>
             <div class="tech-item">
                 <span class="tech-label">Modulation</span>
                 <span class="tech-value">4-FSK</span>
             </div>
             <div class="tech-item">
-                <span class="tech-label">Compression</span>
-                <span class="tech-value">Zstandard</span>
+                <span class="tech-label">Audio API</span>
+                <span class="tech-value">Web Audio</span>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 3rem; padding: 2rem; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--border);">
+            <h3 style="margin-bottom: 1rem; color: var(--accent);">🚀 Quick Start</h3>
+            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+                Open this page on <strong>two different computers</strong>.<br>
+                On Computer A: Select <strong>Transmitter</strong> and choose a file.<br>
+                On Computer B: Select <strong>Receiver</strong> and allow microphone access.<br>
+                Position the speaker near the microphone and start the transfer!
+            </p>
+            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="selectMode('transmitter')">📡 Start as Transmitter</button>
+                <button class="btn btn-secondary" onclick="selectMode('receiver')">📻 Start as Receiver</button>
             </div>
         </div>
     </div>
 
     <script>
         function selectMode(mode) {
-            fetch(`/api/mode/${mode}`, { method: 'POST' })
-                .then(() => {
-                    window.location.href = mode === 'receiver' ? '/receiver.html' : '/transmitter.html';
-                });
+            // Store mode and navigate
+            localStorage.setItem('transferMode', mode);
+            window.location.href = mode === 'receiver' ? 'receiver.html' : 'transmitter.html';
         }
     </script>
 </body>

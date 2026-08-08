@@ -345,10 +345,10 @@ class BrowserTransferManager {
         // Concatenate all chunks
         const totalLength = reconstructed.reduce((sum, chunk) => sum + chunk.length, 0);
         const fileData = new Uint8Array(totalLength);
-        let offset = 0;
+        let dataOffset = 0;
         for (const chunk of reconstructed) {
-            fileData.set(chunk, offset);
-            offset += chunk.length;
+            fileData.set(chunk, dataOffset);
+            dataOffset += chunk.length;
         }
 
         // Verify hash

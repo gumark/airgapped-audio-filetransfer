@@ -8,16 +8,19 @@
 </head>
 <body>
     <div class="container">
-        <header class="hero" style="padding: 1.5rem 1rem;">
-            <h1 style="font-size: 1.5rem;">📻 Receiver</h1>
-            <a href="index.html" style="color: var(--text-muted); font-size: 0.85rem;">← Back to Home</a>
+        <header class="page-header">
+            <div>
+                <span class="eyebrow">Air-gapped transfer</span>
+                <h1>Receiver</h1>
+            </div>
+            <a class="back-link" href="index.html">← Back to home</a>
         </header>
 
         <div class="dashboard">
             <!-- Left Panel: Device & Settings -->
             <div class="panel">
                 <div class="panel-header">
-                    <span class="panel-title">🎤 Audio Input</span>
+                    <span class="panel-title">Audio input</span>
                 </div>
 
                 <div class="setting-group">
@@ -37,7 +40,7 @@
                     </div>
                 </div>
 
-                <div class="setting-group" style="margin-top: 1.5rem;">
+                <div class="setting-group setting-group-spaced">
                     <div class="setting-group-title">Detection Settings</div>
                     <div class="setting-row">
                         <span class="setting-label">Modulation</span>
@@ -48,12 +51,12 @@
                         <span class="setting-value" id="symbolRate">250 baud</span>
                     </div>
                     <div class="setting-row">
-                        <span class="setting-label">FEC Overhead</span>
-                        <span class="setting-value" id="fecOverhead">25%</span>
+                        <span class="setting-label">Browser FEC Check</span>
+                        <span class="setting-value" id="fecOverhead">Metadata selected</span>
                     </div>
                 </div>
 
-                <div class="setting-group" style="margin-top: 1.5rem;">
+                <div class="setting-group setting-group-spaced">
                     <div class="setting-group-title">Frequencies</div>
                     <div class="setting-row">
                         <span class="setting-label">Symbol 0</span>
@@ -73,9 +76,9 @@
                     </div>
                 </div>
 
-                <div style="margin-top: 1.5rem;">
-                    <button class="btn btn-primary" style="width: 100%;" id="startListenBtn" onclick="startListening()">
-                        🎤 Start Listening
+                <div class="action-row-spaced">
+                    <button class="btn btn-primary btn-block" id="startListenBtn" onclick="startListening()">
+                        Start listening
                     </button>
                 </div>
             </div>
@@ -84,14 +87,14 @@
             <div class="panel" id="centerPanel">
                 <!-- Waiting State -->
                 <div class="progress-section" id="waitingSection">
-                    <div style="font-size: 4rem; margin-bottom: 1rem; animation: pulse 2s infinite;">👂</div>
-                    <div class="progress-title" style="color: var(--accent);">WAITING FOR TRANSMISSION</div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">
-                        Click "Start Listening" to begin receiving audio.<br>
-                        Position your microphone near the transmitter's speaker.
+                    <div class="waiting-mark" aria-hidden="true">∿</div>
+                    <div class="progress-title">Waiting for transmission</div>
+                    <p class="state-copy">
+                        Start listening to receive audio.<br>
+                        Place the microphone near the transmitter's speaker.
                     </p>
-                    <div class="signal-meter" style="max-width: 300px; margin: 0 auto;">
-                        <div class="viz-label" style="text-align: center;">Signal Strength</div>
+                    <div class="signal-meter signal-meter-centered">
+                        <div class="viz-label viz-label-centered">Signal strength</div>
                         <div class="signal-bars" id="waitingSignalBars">
                             <div class="signal-bar"></div>
                             <div class="signal-bar"></div>
@@ -128,16 +131,16 @@
                             <div class="stat-value" id="signalLevel">-- dB</div>
                         </div>
                     </div>
-                    <div style="margin-top: 1.5rem;">
-                        <button class="btn btn-danger" onclick="stopListening()">⏹ Stop</button>
+                    <div class="action-row action-row-centered action-row-spaced">
+                        <button class="btn btn-danger" onclick="stopListening()">Stop listening</button>
                     </div>
                 </div>
 
                 <!-- Complete State -->
                 <div class="progress-section" id="completeSection" style="display: none;">
-                    <div class="complete-icon" id="completeIcon">✅</div>
+                    <div class="complete-icon" id="completeIcon" aria-hidden="true">✓</div>
                     <div class="complete-title" id="completeTitle">TRANSFER COMPLETE</div>
-                    <div class="complete-checks" style="max-width: 300px; margin: 0 auto 1.5rem;">
+                    <div class="complete-checks complete-checks-centered">
                         <div class="complete-check" id="checkFrames">
                             <span class="check-icon">✓</span> All frames received
                         </div>
@@ -148,10 +151,10 @@
                             <span class="check-icon">✓</span> File reconstructed
                         </div>
                     </div>
-                    <div class="complete-file" id="completeFile" style="font-size: 1.2rem; margin-bottom: 1rem;"></div>
+                    <div class="complete-file complete-file-large" id="completeFile"></div>
                     <div class="hash-display" id="completeHash"></div>
-                    <div style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                        <button class="btn btn-primary" onclick="resetReceiver()">🔄 New Transfer</button>
+                    <div class="action-row action-row-centered action-row-spaced">
+                        <button class="btn btn-primary" onclick="resetReceiver()">New transfer</button>
                     </div>
                 </div>
             </div>
@@ -159,7 +162,7 @@
             <!-- Right Panel: Visualization & Log -->
             <div class="panel">
                 <div class="panel-header">
-                    <span class="panel-title">📊 Visualization</span>
+                    <span class="panel-title">Visualization</span>
                 </div>
 
                 <div class="viz-container">
@@ -192,14 +195,14 @@
 
                 <div class="viz-container">
                     <div class="viz-label">Detected Frequencies</div>
-                    <div id="detectedFreqs" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-secondary); padding: 0.5rem;">
+                    <div class="detected-frequencies" id="detectedFreqs">
                         No signal detected
                     </div>
                 </div>
 
-                <div class="panel-header" style="margin-top: 1rem;">
-                    <span class="panel-title">📋 Log</span>
-                    <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="exportLog()">Export</button>
+                <div class="panel-header panel-header-spaced">
+                    <span class="panel-title">Log</span>
+                    <button class="btn btn-secondary btn-compact" onclick="exportLog()">Export</button>
                 </div>
 
                 <div class="log-container" id="logContainer">
@@ -250,10 +253,10 @@
                 document.getElementById('completeSection').style.display = 'block';
                 
                 if (result.success) {
-                    document.getElementById('completeIcon').textContent = '✅';
+                    document.getElementById('completeIcon').textContent = '✓';
                     document.getElementById('completeTitle').textContent = 'TRANSFER COMPLETE';
                 } else {
-                    document.getElementById('completeIcon').textContent = '❌';
+                    document.getElementById('completeIcon').textContent = '×';
                     document.getElementById('completeTitle').textContent = 'TRANSFER FAILED';
                 }
                 
@@ -288,7 +291,8 @@
             isListening = true;
             transferManager.startReceiving({
                 symbolRate: 250,
-                frequencies: [1200, 1600, 2000, 2400]
+                frequencies: [1200, 1600, 2000, 2400],
+                fecOverhead: 0
             });
         }
 
@@ -334,10 +338,10 @@
             canvas.width = canvas.offsetWidth;
             canvas.height = canvas.offsetHeight;
 
-            ctx.fillStyle = '#0a0e17';
+            ctx.fillStyle = '#111110';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            ctx.strokeStyle = '#10b981';
+            ctx.strokeStyle = '#a6b18a';
             ctx.lineWidth = 2;
             ctx.beginPath();
 
@@ -352,7 +356,9 @@
             }
             ctx.stroke();
 
-            requestAnimationFrame(drawWaveform);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                requestAnimationFrame(drawWaveform);
+            }
         }
 
         function drawSpectrum() {
@@ -361,7 +367,7 @@
             canvas.width = canvas.offsetWidth;
             canvas.height = canvas.offsetHeight;
 
-            ctx.fillStyle = '#0a0e17';
+            ctx.fillStyle = '#111110';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             const barCount = 32;
@@ -372,11 +378,7 @@
                 const height = (Math.sin(i * 0.4 + time * 1.5) + 1) * 0.25 *
                     canvas.height * (0.2 + Math.random() * 0.15);
 
-                const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - height);
-                gradient.addColorStop(0, '#10b981');
-                gradient.addColorStop(1, '#3b82f6');
-
-                ctx.fillStyle = gradient;
+                ctx.fillStyle = '#a6b18a';
                 ctx.fillRect(
                     i * (barWidth + 2),
                     canvas.height - height,
@@ -385,7 +387,9 @@
                 );
             }
 
-            requestAnimationFrame(drawSpectrum);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                requestAnimationFrame(drawSpectrum);
+            }
         }
 
         drawWaveform();

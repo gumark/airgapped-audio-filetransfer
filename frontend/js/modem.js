@@ -19,15 +19,20 @@ class FSKModulator {
      */
     bytesToSymbols(data) {
         const mask = (1 << this.bitsPerSymbol) - 1;
-        const symbolsPerByte = 8 / this.bitsPerSymbol;
         const symbols = [];
-
-        for (let i = 0; i < data.length; i++) {
-            const byte = data[i];
-            for (let j = 0; j < symbolsPerByte; j++) {
-                const shift = 8 - this.bitsPerSymbol * (j + 1);
-                symbols.push((byte >> shift) & mask);
+        let accumulator = 0;
+        let bits = 0;
+        for (const byte of data) {
+            accumulator = (accumulator << 8) | byte;
+            bits += 8;
+            while (bits >= this.bitsPerSymbol) {
+                bits -= this.bitsPerSymbol;
+                symbols.push((accumulator >> bits) & mask);
+                accumulator &= bits ? (1 << bits) - 1 : 0;
             }
+        }
+        if (bits) {
+            symbols.push((accumulator << (this.bitsPerSymbol - bits)) & mask);
         }
         return symbols;
     }
@@ -124,6 +129,7 @@ class FSKDemodulator {
      */
     goertzel(samples, targetFreq) {
         const N = samples.length;
+        if (N === 0) return 0;
         const k = Math.round((N * targetFreq) / this.sampleRate);
         const omega = (2 * Math.PI * k) / N;
         const cosine = Math.cos(omega);
@@ -160,6 +166,9 @@ class FSKDemodulator {
     demodulateSymbols(audioBuffer, offset = 0) {
         const symbols = [];
         const confidences = [];
+        if (offset < 0 || offset > audioBuffer.length) {
+            throw new RangeError('offset must be within the audio buffer');
+        }
         const numSymbols = Math.floor((audioBuffer.length - offset) / this.samplesPerSymbol);
 
         for (let i = 0; i < numSymbols; i++) {

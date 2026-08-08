@@ -133,6 +133,11 @@ class AudioDeviceManager:
             blocking=blocking,
         )
 
+    def stop_audio(self) -> None:
+        """Stop any active sounddevice playback."""
+        if SOUNDDEVICE_AVAILABLE:
+            sd.stop()
+
     def record_audio(
         self,
         duration: float,
@@ -151,13 +156,15 @@ class AudioDeviceManager:
         if not SOUNDDEVICE_AVAILABLE:
             raise RuntimeError("sounddevice is not installed")
 
-        return sd.rec(
+        recording = sd.rec(
             int(duration * self.sample_rate),
             samplerate=self.sample_rate,
             channels=self.channels,
             device=device,
             dtype="float32",
-        ).flatten()
+            blocking=True,
+        )
+        return recording.flatten()
 
     def start_input_stream(
         self,

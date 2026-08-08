@@ -82,19 +82,23 @@ class SimulatedChannel:
             gain_linear = 10 ** (self.params.gain_db / 20)
             output *= gain_linear
 
-        # 2. Frequency shift
+        # 2. Frequency shift. Use an analytic-signal rotation so the
+        # simulator shifts carriers instead of applying amplitude modulation.
         if self.params.frequency_shift_hz != 0:
+            from scipy.signal import hilbert
             t = np.arange(len(output), dtype=np.float64) / sample_rate
-            shift = np.exp(1j * 2 * np.pi * self.params.frequency_shift_hz * t)
-            # Apply as AM modulation (simplified - real implementation would
-            # use IQ modulation for proper frequency shifting)
-            output *= np.cos(2 * np.pi * self.params.frequency_shift_hz * t)
+            analytic = hilbert(output)
+            output = np.real(
+                analytic * np.exp(1j * 2 * np.pi * self.params.frequency_shift_hz * t)
+            )
 
-        # 3. Frequency drift
+        # 3. Frequency drift. Integrate the changing offset into phase.
         if self.params.frequency_drift_hz_per_sec != 0:
+            from scipy.signal import hilbert
             t = np.arange(len(output), dtype=np.float64) / sample_rate
-            drift = self.params.frequency_drift_hz_per_sec * t
-            output *= np.cos(2 * np.pi * drift * t)
+            drift_phase = np.pi * self.params.frequency_drift_hz_per_sec * t * t
+            analytic = hilbert(output)
+            output = np.real(analytic * np.exp(1j * drift_phase))
 
         # 4. Add white noise
         if self.params.noise_level_db > -100:

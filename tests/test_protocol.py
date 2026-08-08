@@ -6,10 +6,13 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pytest
+
 from backend.protocol.packet import (
     Frame, FrameType, ProtocolConfig,
     deserialize_frame, calculate_crc, MAGIC, PROTOCOL_VERSION,
     encode_metadata_payload, decode_metadata_payload,
+    encode_handshake_payload, decode_handshake_payload, ProtocolError,
 )
 
 
@@ -83,8 +86,51 @@ def test_metadata_encoding():
     assert decoded["total_chunks"] == 1
     assert decoded["hash_algorithm"] == "sha256"
     assert decoded["file_hash"] == "abc123"
-    assert decoded["compression_enabled"] == True
-    assert decoded["encryption_enabled"] == False
+    assert decoded["compression_enabled"] is True
+    assert decoded["encryption_enabled"] is False
+    assert decoded["fec_algorithm"] == "reed-solomon"
+
+
+def test_metadata_disabled_fec_has_zero_overhead_and_none_algorithm():
+    payload = encode_metadata_payload(
+        filename="x",
+        filesize=0,
+        mime_type="application/octet-stream",
+        chunk_size=128,
+        total_chunks=1,
+        hash_algorithm="sha256",
+        file_hash="00",
+        compression_enabled=False,
+        encryption_enabled=False,
+        fec_overhead=0.25,
+        fec_enabled=False,
+    )
+    decoded = decode_metadata_payload(payload)
+    assert decoded["fec_overhead"] == 0.0
+    assert decoded["fec_enabled"] is False
+    assert decoded["fec_algorithm"] == "none"
+
+
+def test_handshake_roundtrip():
+    config = ProtocolConfig(
+        fec_enabled=False,
+        compression_enabled=False,
+        sync_preamble_symbols=32,
+    )
+    decoded = decode_handshake_payload(encode_handshake_payload(config))
+    assert decoded["sample_rate"] == config.sample_rate
+    assert decoded["symbol_rate"] == config.symbol_rate
+    assert decoded["bits_per_symbol"] == config.bits_per_symbol
+    assert decoded["frequencies"] == config.frequencies
+    assert decoded["fec_enabled"] is False
+    assert decoded["fec_algorithm"] == "none"
+    assert decoded["fec_overhead"] == 0.0
+
+
+def test_handshake_rejects_trailing_bytes():
+    config = ProtocolConfig()
+    with pytest.raises(ProtocolError, match="invalid length"):
+        decode_handshake_payload(encode_handshake_payload(config) + b"x")
 
 
 def test_protocol_config():

@@ -5,7 +5,19 @@
  */
 
 const MAGIC = new Uint8Array([0x41, 0x54, 0x46, 0x52]); // "ATFR"
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
+
+const FEC_ALGORITHM = {
+    NONE: 0,
+    REED_SOLOMON: 1,
+    XOR_PARITY: 2
+};
+
+const FEC_ALGORITHM_NAMES = {
+    0: 'none',
+    1: 'reed-solomon',
+    2: 'xor-parity'
+};
 
 const FrameType = {
     SYNC: 0x01,
@@ -116,9 +128,11 @@ class Frame {
         // Extract fields
         const transferId = (data[5] << 24) | (data[6] << 16) | (data[7] << 8) | data[8];
         const type = data[9];
+        if (!Object.values(FrameType).includes(type)) return null;
         const sequenceNumber = (data[10] << 24) | (data[11] << 16) | (data[12] << 8) | data[13];
         const totalFrames = (data[14] << 24) | (data[15] << 16) | (data[16] << 8) | data[17];
         const payloadLength = (data[18] << 8) | data[19];
+        if (payloadLength > 2048 || data.length < 22 + payloadLength) return null;
 
         // Verify CRC
         const frameData = data.slice(0, 20 + payloadLength);
@@ -137,12 +151,79 @@ class Frame {
 /**
  * Encode metadata into payload bytes.
  */
+function encodeHandshake(options = {}) {
+    const sampleRate = options.sampleRate || 48000;
+    const symbolRate = options.symbolRate || 250;
+    const bitsPerSymbol = options.bitsPerSymbol || 2;
+    const frequencies = options.frequencies || [1200, 1600, 2000, 2400];
+    const fecEnabled = options.fecEnabled !== false;
+    const fecAlgorithm = options.fecAlgorithm ||
+        (fecEnabled ? 'xor-parity' : 'none');
+    const fecAlgorithmId = Object.entries(FEC_ALGORITHM_NAMES)
+        .find(([, name]) => name === fecAlgorithm)?.[0];
+    if (fecAlgorithmId === undefined) throw new RangeError('unsupported FEC algorithm');
+    const preambleSymbols = options.syncPreambleSymbols || 32;
+    const syncFrequency = options.syncFrequency || 1000;
+    const headerSize = 4 + 4 + 1 + 1 + 1 + 1 + 1 + 2 + 2;
+    const payload = new Uint8Array(headerSize + frequencies.length * 2);
+    const view = new DataView(payload.buffer);
+    let offset = 0;
+    view.setUint32(offset, sampleRate); offset += 4;
+    view.setUint32(offset, symbolRate); offset += 4;
+    payload[offset++] = bitsPerSymbol;
+    payload[offset++] = frequencies.length;
+    payload[offset++] = Math.round((options.fecOverhead || 0) * 100);
+    payload[offset++] = Number(fecAlgorithmId);
+    payload[offset++] = fecEnabled ? 1 : 0;
+    view.setUint16(offset, preambleSymbols); offset += 2;
+    view.setUint16(offset, syncFrequency); offset += 2;
+    for (const frequency of frequencies) {
+        view.setUint16(offset, frequency);
+        offset += 2;
+    }
+    return payload;
+}
+
+/**
+ * Encode metadata into payload bytes.
+ */
+function decodeHandshake(payload) {
+    if (!(payload instanceof Uint8Array) || payload.length < 17) {
+        throw new RangeError('handshake payload is truncated');
+    }
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    let offset = 0;
+    const sampleRate = view.getUint32(offset); offset += 4;
+    const symbolRate = view.getUint32(offset); offset += 4;
+    const bitsPerSymbol = payload[offset++];
+    const frequencyCount = payload[offset++];
+    const fecOverhead = payload[offset++] / 100;
+    const fecAlgorithm = FEC_ALGORITHM_NAMES[payload[offset++]];
+    const fecEnabled = payload[offset++] === 1;
+    const syncPreambleSymbols = view.getUint16(offset); offset += 2;
+    const syncFrequency = view.getUint16(offset); offset += 2;
+    if (!fecAlgorithm) throw new RangeError('unknown handshake FEC algorithm');
+    if (payload.length !== offset + frequencyCount * 2) {
+        throw new RangeError('handshake payload has an invalid length');
+    }
+    const frequencies = [];
+    for (let i = 0; i < frequencyCount; i++) {
+        frequencies.push(view.getUint16(offset));
+        offset += 2;
+    }
+    return {
+        sampleRate, symbolRate, bitsPerSymbol, frequencies,
+        fecOverhead, fecAlgorithm, fecEnabled,
+        syncPreambleSymbols, syncFrequency
+    };
+}
+
 function encodeMetadata(metadata) {
     const encoder = new TextEncoder();
     const fields = [
         encoder.encode(metadata.filename || ''),
         encoder.encode(metadata.mimeType || 'application/octet-stream'),
-        encoder.encode(metadata.hashAlgorithm || 'sha-256'),
+        encoder.encode(metadata.hashAlgorithm || 'sha256'),
         encoder.encode(metadata.fileHash || '')
     ];
 
@@ -151,21 +232,17 @@ function encodeMetadata(metadata) {
     for (const field of fields) {
         totalSize += 2 + field.length; // length(2) + data
     }
-    totalSize += 2; // compression + encryption flags
+    totalSize += 5; // compression + encryption + FEC overhead + FEC enabled + algorithm
 
     const payload = new Uint8Array(totalSize);
     let offset = 0;
 
-    // File size (big-endian 64-bit, simplified to 32-bit for JS)
-    const fileSize = metadata.filesize || 0;
-    payload[offset++] = (fileSize >> 24) & 0xFF;
-    payload[offset++] = (fileSize >> 16) & 0xFF;
-    payload[offset++] = (fileSize >> 8) & 0xFF;
-    payload[offset++] = fileSize & 0xFF;
-    payload[offset++] = 0; // Upper 32 bits
-    payload[offset++] = 0;
-    payload[offset++] = 0;
-    payload[offset++] = 0;
+    // File size (big-endian 64-bit). Use BigInt so files above 4 GiB
+    // are represented correctly without bitwise-number truncation.
+    const fileSize = BigInt(metadata.filesize || 0);
+    for (let shift = 56n; shift >= 0n; shift -= 8n) {
+        payload[offset++] = Number((fileSize >> shift) & 0xFFn);
+    }
 
     // Chunk size
     const chunkSize = metadata.chunkSize || 4096;
@@ -192,9 +269,17 @@ function encodeMetadata(metadata) {
         offset += field.length;
     }
 
-    // Flags
+    // Flags and FEC overhead percentage
     payload[offset++] = metadata.compressionEnabled ? 1 : 0;
     payload[offset++] = metadata.encryptionEnabled ? 1 : 0;
+    payload[offset++] = Math.max(0, Math.min(100, Math.round((metadata.fecOverhead || 0) * 100)));
+    payload[offset++] = metadata.fecEnabled === false ? 0 : 1;
+    const fecAlgorithm = metadata.fecAlgorithm ||
+        (metadata.fecEnabled === false ? 'none' : 'xor-parity');
+    const fecAlgorithmId = Object.entries(FEC_ALGORITHM_NAMES)
+        .find(([, name]) => name === fecAlgorithm)?.[0];
+    if (fecAlgorithmId === undefined) throw new RangeError('unsupported FEC algorithm');
+    payload[offset++] = Number(fecAlgorithmId);
 
     return payload;
 }
@@ -203,30 +288,43 @@ function encodeMetadata(metadata) {
  * Decode metadata from payload bytes.
  */
 function decodeMetadata(payload) {
+    if (!(payload instanceof Uint8Array) || payload.length < 17) {
+        throw new RangeError('metadata payload is truncated');
+    }
     let offset = 0;
 
-    // File size
-    const filesize = (payload[offset] << 24) | (payload[offset + 1] << 16) | (payload[offset + 2] << 8) | payload[offset + 3];
-    offset += 8; // Skip upper 32 bits
+    // File size (64-bit; preserve exact values where supported).
+    let filesizeBig = 0n;
+    for (let i = 0; i < 8; i++) {
+        filesizeBig = (filesizeBig << 8n) | BigInt(payload[offset++]);
+    }
+    const filesize = filesizeBig <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? Number(filesizeBig)
+        : filesizeBig.toString();
 
     // Chunk size
     const chunkSize = (payload[offset] << 24) | (payload[offset + 1] << 16) | (payload[offset + 2] << 8) | payload[offset + 3];
     offset += 4;
 
     // Total chunks
-    const totalChunks = (payload[offset] << 24) | (payload[offset + 1] << 16) | (payload[offset + 2] << 8) | payload[offset + 3];
+    const totalChunks = (payload[offset] * 0x1000000) +
+        (payload[offset + 1] << 16) +
+        (payload[offset + 2] << 8) + payload[offset + 3];
     offset += 4;
 
     // Number of fields
     const numFields = payload[offset++];
+    if (numFields > 4) throw new RangeError('metadata contains too many fields');
 
     const decoder = new TextDecoder();
     const fieldNames = ['filename', 'mimeType', 'hashAlgorithm', 'fileHash'];
     const result = { filesize, chunkSize, totalChunks };
 
     for (let i = 0; i < numFields; i++) {
+        if (offset + 2 > payload.length) throw new RangeError('metadata field length is truncated');
         const fieldLen = (payload[offset] << 8) | payload[offset + 1];
         offset += 2;
+        if (offset + fieldLen > payload.length) throw new RangeError('metadata field is truncated');
         const fieldValue = decoder.decode(payload.slice(offset, offset + fieldLen));
         offset += fieldLen;
         if (i < fieldNames.length) {
@@ -241,6 +339,17 @@ function decodeMetadata(payload) {
     if (offset < payload.length) {
         result.encryptionEnabled = payload[offset++] === 1;
     }
+    if (offset < payload.length) {
+        result.fecOverhead = payload[offset++] / 100;
+    }
+    if (offset < payload.length) {
+        result.fecEnabled = payload[offset++] === 1;
+    }
+    if (offset < payload.length) {
+        result.fecAlgorithm = FEC_ALGORITHM_NAMES[payload[offset++]];
+        if (!result.fecAlgorithm) throw new RangeError('unknown FEC algorithm');
+    }
+    if (offset !== payload.length) throw new RangeError('metadata contains trailing bytes');
 
     return result;
 }
@@ -248,5 +357,8 @@ function decodeMetadata(payload) {
 // Export for use in other modules
 window.FrameType = FrameType;
 window.Frame = Frame;
+window.FEC_ALGORITHM = FEC_ALGORITHM;
+window.encodeHandshake = encodeHandshake;
+window.decodeHandshake = decodeHandshake;
 window.encodeMetadata = encodeMetadata;
 window.decodeMetadata = decodeMetadata;

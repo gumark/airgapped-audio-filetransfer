@@ -30,6 +30,8 @@ def goertzel_magnitude(samples: np.ndarray, target_freq: float,
         Squared magnitude of the DFT at target_freq
     """
     N = len(samples)
+    if N == 0:
+        return 0.0
     k = int(0.5 + (N * target_freq) / sample_rate)
     omega = (2.0 * np.pi * k) / N
     cosine = np.cos(omega)
@@ -136,6 +138,8 @@ class FSKDemodulator:
         confidences = []
 
         samples_per_sym = self.samples_per_symbol
+        if offset < 0 or offset > len(waveform):
+            raise ValueError("offset must be within the waveform")
         num_symbols = (len(waveform) - offset) // samples_per_sym
 
         for i in range(num_symbols):
@@ -223,5 +227,7 @@ class FSKDemodulator:
 
         Returns fraction of samples at or above threshold.
         """
+        if len(waveform) == 0:
+            return 0.0
         clipped = np.sum(np.abs(waveform) >= threshold)
         return float(clipped / len(waveform))

@@ -8,35 +8,37 @@
 </head>
 <body>
     <div class="container">
-        <header class="hero" style="padding: 1.5rem 1rem;">
-            <h1 style="font-size: 1.5rem;">📡 Transmitter</h1>
-            <a href="index.html" style="color: var(--text-muted); font-size: 0.85rem;">← Back to Home</a>
+        <header class="page-header">
+            <div>
+                <span class="eyebrow">Air-gapped transfer</span>
+                <h1>Transmitter</h1>
+            </div>
+            <a class="back-link" href="index.html">← Back to home</a>
         </header>
 
         <div class="dashboard">
             <!-- Left Panel: File & Settings -->
             <div class="panel">
                 <div class="panel-header">
-                    <span class="panel-title">📁 File Selection</span>
+                    <span class="panel-title">File selection</span>
                 </div>
 
-                <div class="file-drop-zone" id="fileDropZone">
-                    <div class="file-drop-icon">📤</div>
+                <div class="file-drop-zone" id="fileDropZone" role="button" tabindex="0" aria-label="Choose a file to transmit">
                     <div class="file-drop-text">Drop a file here or click to select</div>
                     <div class="file-drop-hint">Any file type supported</div>
-                    <input type="file" id="fileInput" style="display: none;">
+                    <input type="file" id="fileInput" class="visually-hidden" aria-label="File to transmit">
                 </div>
 
                 <div class="file-info" id="fileInfo">
                     <div class="file-name" id="fileName"></div>
                     <div class="file-meta">
                         <span><span class="label">Size</span> <span id="fileSize"></span></span>
-                        <span><span class="label">Hash</span> <span id="fileHash" style="font-family: var(--font-mono); font-size: 0.75rem;"></span></span>
+                        <span><span class="label">Hash</span> <span id="fileHash" class="file-hash"></span></span>
                         <span><span class="label">Est. Time</span> <span id="estTime"></span></span>
                     </div>
                 </div>
 
-                <div class="setting-group" style="margin-top: 1.5rem;">
+                <div class="setting-group setting-group-spaced">
                     <div class="setting-group-title">Audio Settings</div>
                     <div class="setting-row">
                         <span class="setting-label">Output</span>
@@ -52,6 +54,7 @@
                     </div>
                     <div class="setting-row">
                         <span class="setting-label">Symbol Rate</span>
+                        <label class="visually-hidden" for="symbolRate">Symbol rate</label>
                         <select class="setting-select" id="symbolRate">
                             <option value="150">150 baud (Reliable)</option>
                             <option value="250" selected>250 baud (Balanced)</option>
@@ -59,18 +62,19 @@
                         </select>
                     </div>
                     <div class="setting-row">
-                        <span class="setting-label">FEC Overhead</span>
+                        <span class="setting-label">Browser FEC Check</span>
+                        <label class="visually-hidden" for="fecOverhead">Browser FEC check</label>
                         <select class="setting-select" id="fecOverhead">
-                            <option value="10">10% (Minimal)</option>
-                            <option value="20">20% (Low)</option>
-                            <option value="25" selected>25% (Default)</option>
-                            <option value="30">30% (Medium)</option>
-                            <option value="40">40% (High)</option>
+                            <option value="0" selected>Disabled (hash verification)</option>
+                            <option value="10">10% parity (detection only)</option>
+                            <option value="20">20% parity (detection only)</option>
+                            <option value="25">25% parity (detection only)</option>
+                            <option value="40">40% parity (detection only)</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="setting-group" style="margin-top: 1.5rem;">
+                <div class="setting-group setting-group-spaced">
                     <div class="setting-group-title">Frequencies</div>
                     <div class="setting-row">
                         <span class="setting-label">Symbol 0</span>
@@ -95,12 +99,12 @@
             <div class="panel" id="centerPanel">
                 <div class="progress-section" id="idleSection">
                     <div class="progress-title">Ready to Transmit</div>
-                    <p style="color: var(--text-secondary); margin-bottom: 2rem;">
+                    <p class="state-copy">
                         Select a file and configure settings, then start transmission.
                     </p>
-                    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+                    <div class="action-row action-row-centered">
                         <button class="btn btn-success" id="startBtn" onclick="startTransfer()" disabled>
-                            📡 Start Transmission
+                            Start transmission
                         </button>
                     </div>
                 </div>
@@ -125,13 +129,13 @@
                             <div class="stat-value" id="txStatus">Encoding</div>
                         </div>
                     </div>
-                    <div style="margin-top: 1.5rem;">
-                        <button class="btn btn-danger" onclick="cancelTransfer()">⏹ Cancel</button>
+                    <div class="action-row action-row-centered action-row-spaced">
+                        <button class="btn btn-danger" onclick="cancelTransfer()">Cancel</button>
                     </div>
                 </div>
 
                 <div class="progress-section" id="completeSection" style="display: none;">
-                    <div class="complete-icon">✅</div>
+                    <div class="complete-icon" aria-hidden="true">✓</div>
                     <div class="complete-title">Transmission Complete</div>
                     <div class="complete-file" id="completeFile"></div>
                     <div class="complete-checks">
@@ -142,14 +146,14 @@
                             <span class="check-icon">✓</span> File hash computed
                         </div>
                     </div>
-                    <button class="btn btn-primary" onclick="resetTransfer()">🔄 New Transfer</button>
+                    <button class="btn btn-primary" onclick="resetTransfer()">New transfer</button>
                 </div>
             </div>
 
             <!-- Right Panel: Visualization & Log -->
             <div class="panel">
                 <div class="panel-header">
-                    <span class="panel-title">📊 Visualization</span>
+                    <span class="panel-title">Visualization</span>
                 </div>
 
                 <div class="viz-container">
@@ -180,9 +184,9 @@
                     </div>
                 </div>
 
-                <div class="panel-header" style="margin-top: 1rem;">
-                    <span class="panel-title">📋 Log</span>
-                    <button class="btn btn-secondary" style="padding: 0.25rem 0.75rem; font-size: 0.75rem;" onclick="exportLog()">Export</button>
+                <div class="panel-header panel-header-spaced">
+                    <span class="panel-title">Log</span>
+                    <button class="btn btn-secondary btn-compact" onclick="exportLog()">Export</button>
                 </div>
 
                 <div class="log-container" id="logContainer">
@@ -209,6 +213,12 @@
         const fileInput = document.getElementById('fileInput');
 
         fileDropZone.addEventListener('click', () => fileInput.click());
+        fileDropZone.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                fileInput.click();
+            }
+        });
         fileDropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             fileDropZone.classList.add('dragover');
@@ -301,7 +311,8 @@
 
             transferManager.startTransmission(selectedFile, {
                 symbolRate: symbolRate,
-                frequencies: [1200, 1600, 2000, 2400]
+                frequencies: [1200, 1600, 2000, 2400],
+                fecOverhead: fecOverhead
             });
         }
 
@@ -325,10 +336,10 @@
             canvas.width = canvas.offsetWidth;
             canvas.height = canvas.offsetHeight;
 
-            ctx.fillStyle = '#0a0e17';
+            ctx.fillStyle = '#111110';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            ctx.strokeStyle = '#3b82f6';
+            ctx.strokeStyle = '#c77b52';
             ctx.lineWidth = 2;
             ctx.beginPath();
 
@@ -342,7 +353,9 @@
             }
             ctx.stroke();
 
-            requestAnimationFrame(drawWaveform);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                requestAnimationFrame(drawWaveform);
+            }
         }
 
         function drawSpectrum() {
@@ -351,7 +364,7 @@
             canvas.width = canvas.offsetWidth;
             canvas.height = canvas.offsetHeight;
 
-            ctx.fillStyle = '#0a0e17';
+            ctx.fillStyle = '#111110';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             const barCount = 32;
@@ -362,11 +375,7 @@
                 const height = (Math.sin(i * 0.3 + time * 2) + 1) * 0.3 *
                     canvas.height * (0.3 + Math.random() * 0.1);
 
-                const gradient = ctx.createLinearGradient(0, canvas.height, 0, canvas.height - height);
-                gradient.addColorStop(0, '#3b82f6');
-                gradient.addColorStop(1, '#8b5cf6');
-
-                ctx.fillStyle = gradient;
+                ctx.fillStyle = '#c77b52';
                 ctx.fillRect(
                     i * (barWidth + 2),
                     canvas.height - height,
@@ -375,7 +384,9 @@
                 );
             }
 
-            requestAnimationFrame(drawSpectrum);
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                requestAnimationFrame(drawSpectrum);
+            }
         }
 
         drawWaveform();

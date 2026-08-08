@@ -6,11 +6,15 @@
  */
 
 class SimpleFEC {
-    constructor(overheadPercent = 25) {
-        this.overheadPercent = overheadPercent;
-        this.blockSize = 255; // Standard RS block size
-        this.eccSize = Math.floor(this.blockSize * (overheadPercent / 100));
-        this.dataSize = this.blockSize - this.eccSize;
+    constructor(overheadPercent = 0) {
+        // Browser parity is detection-only, not Reed-Solomon correction. Keep
+        // it disabled by default so the UI never promises correction it cannot
+        // provide. The Python backend remains the full-FEC implementation.
+        this.overheadPercent = Math.max(0, Math.min(100, overheadPercent));
+        this.eccSize = this.overheadPercent === 0
+            ? 0
+            : Math.max(1, Math.floor(255 * (this.overheadPercent / 100)));
+        this.dataSize = 255 - this.eccSize;
     }
 
     /**
@@ -18,6 +22,7 @@ class SimpleFEC {
      * Uses XOR-based parity for simplicity.
      */
     encode(data) {
+        if (this.eccSize === 0) return new Uint8Array(data);
         const encoded = new Uint8Array(data.length + this.eccSize);
         encoded.set(data);
 
@@ -37,8 +42,11 @@ class SimpleFEC {
      * Decode data, attempting to correct errors.
      */
     decode(encoded) {
+        if (this.eccSize === 0) {
+            return { data: new Uint8Array(encoded), corrected: false, errors: 0, valid: true };
+        }
         if (encoded.length < this.eccSize) {
-            return { data: encoded, corrected: false, errors: 0 };
+            return { data: encoded, corrected: false, errors: 0, valid: false };
         }
 
         const dataEnd = encoded.length - this.eccSize;
@@ -59,8 +67,9 @@ class SimpleFEC {
 
         return {
             data: data,
-            corrected: errors === 0,
-            errors: errors
+            corrected: false,
+            errors: errors,
+            valid: errors === 0
         };
     }
 
@@ -85,6 +94,9 @@ class SimpleFEC {
 
         for (const chunk of chunks) {
             const result = this.decode(chunk);
+            if (!result.valid) {
+                return { data: new Uint8Array(0), totalErrors: totalErrors + result.errors, valid: false };
+            }
             decoded.push(result.data);
             totalErrors += result.errors;
         }
@@ -98,7 +110,7 @@ class SimpleFEC {
             offset += d.length;
         }
 
-        return { data: result, totalErrors };
+        return { data: result, totalErrors, valid: true };
     }
 }
 

@@ -58,22 +58,22 @@ class FSKModulator:
 
     def symbols_to_bytes(self, data: bytes) -> List[int]:
         """
-        Convert a byte sequence into a list of symbols.
-
-        For 4-FSK (2 bits/symbol):
-            byte 0b11010010 → symbols [3, 1, 0, 2]
-
-        Bits are grouped from MSB to LSB.
-        Each byte produces 8/bits_per_symbol symbols.
+        Convert bytes to MSB-first symbols without assuming that the symbol
+        width divides eight. The final symbol is zero-padded when necessary.
         """
         mask = (1 << self.bits_per_symbol) - 1
-        symbols_per_byte = 8 // self.bits_per_symbol
         symbols = []
+        accumulator = 0
+        bits = 0
         for byte in data:
-            for i in range(symbols_per_byte):
-                shift = 8 - self.bits_per_symbol * (i + 1)
-                symbol = (byte >> shift) & mask
-                symbols.append(symbol)
+            accumulator = (accumulator << 8) | byte
+            bits += 8
+            while bits >= self.bits_per_symbol:
+                bits -= self.bits_per_symbol
+                symbols.append((accumulator >> bits) & mask)
+                accumulator &= (1 << bits) - 1 if bits else 0
+        if bits:
+            symbols.append((accumulator << (self.bits_per_symbol - bits)) & mask)
         return symbols
 
     def bytes_to_symbols(self, data: bytes) -> List[int]:
@@ -147,5 +147,7 @@ class FSKModulator:
         """
         num_samples = int(self.sample_rate * duration)
         t = np.arange(num_samples, dtype=np.float64)
-        tone = self.amplitude * 0.5 * np.sin(2.0 * np.pi * frequency * t)
+        tone = self.amplitude * 0.5 * np.sin(
+            2.0 * np.pi * frequency * t / self.sample_rate
+        )
         return np.concatenate([tone.astype(np.float32), waveform])

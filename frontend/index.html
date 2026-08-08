@@ -6,7 +6,7 @@
     <title>Air-Gapped Audio Transfer</title>
     <link rel="stylesheet" href="css/main.css">
     <meta name="description" content="Transfer files between isolated computers using only sound - 100% air-gapped">
-    <meta name="theme-color" content="#0a0e17">
+    <meta name="theme-color" content="#151515">
 </head>
 <body>
     <div class="container">
@@ -25,23 +25,22 @@
             <h1>Air-Gapped Audio Transfer</h1>
             <p class="subtitle">Transfer files between isolated computers using only sound</p>
             <div class="security-badge">
-                <span class="badge-icon">🔒</span>
-                <span>100% Air-Gapped — No Network Required</span>
+                <span class="badge-icon" aria-hidden="true">◈</span>
+                <span>100% air-gapped · no network required</span>
             </div>
         </header>
 
         <div class="mode-selection">
-            <div class="mode-card" onclick="selectMode('transmitter')">
-                <div class="mode-icon">📡</div>
+            <a class="mode-card" href="transmitter.html" onclick="selectMode('transmitter'); return false;">
                 <h2>Transmitter</h2>
                 <p>Select a file and broadcast it through your speaker</p>
                 <div class="mode-features">
-                    <span>📤 File Selection</span>
-                    <span>🔊 Audio Output</span>
-                    <span>📊 Real-time Stats</span>
+                    <span>File selection</span>
+                    <span>Audio output</span>
+                    <span>Real-time stats</span>
                 </div>
-                <button class="btn btn-primary">Configure Transmitter</button>
-            </div>
+                <span class="btn btn-primary">Configure transmitter</span>
+            </a>
 
             <div class="mode-divider">
                 <div class="divider-line"></div>
@@ -49,17 +48,16 @@
                 <div class="divider-line"></div>
             </div>
 
-            <div class="mode-card" onclick="selectMode('receiver')">
-                <div class="mode-icon">📻</div>
+            <a class="mode-card" href="receiver.html" onclick="selectMode('receiver'); return false;">
                 <h2>Receiver</h2>
                 <p>Listen with your microphone and reconstruct the file</p>
                 <div class="mode-features">
-                    <span>📥 File Reception</span>
-                    <span>🎤 Audio Input</span>
-                    <span>✅ Verification</span>
+                    <span>File reception</span>
+                    <span>Audio input</span>
+                    <span>Verification</span>
                 </div>
-                <button class="btn btn-secondary">Configure Receiver</button>
-            </div>
+                <span class="btn btn-secondary">Configure receiver</span>
+            </a>
         </div>
 
         <div class="how-it-works">
@@ -110,19 +108,20 @@
             </div>
         </div>
 
-        <div style="text-align: center; margin-top: 3rem; padding: 2rem; background: var(--bg-card); border-radius: var(--radius-lg); border: 1px solid var(--border);">
-            <h3 style="margin-bottom: 1rem; color: var(--accent);">🚀 Quick Start</h3>
-            <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-                Open this page on <strong>two different computers</strong>.<br>
-                On Computer A: Select <strong>Transmitter</strong> and choose a file.<br>
-                On Computer B: Select <strong>Receiver</strong> and allow microphone access.<br>
-                Position the speaker near the microphone and start the transfer!
-            </p>
-            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                <button class="btn btn-primary" onclick="selectMode('transmitter')">📡 Start as Transmitter</button>
-                <button class="btn btn-secondary" onclick="selectMode('receiver')">📻 Start as Receiver</button>
+        <section class="quick-start">
+            <div class="quick-start-heading">
+                <span class="eyebrow">Quick start</span>
+                <h2>Set up two isolated machines.</h2>
             </div>
-        </div>
+            <p>
+                Use one computer as the transmitter and another as the receiver. Choose a file on the first,
+                allow microphone access on the second, then place the speaker near the microphone.
+            </p>
+            <div class="action-row">
+                <button class="btn btn-primary" onclick="selectMode('transmitter')">Start as transmitter</button>
+                <button class="btn btn-secondary" onclick="selectMode('receiver')">Start as receiver</button>
+            </div>
+        </section>
     </div>
 
     <script>

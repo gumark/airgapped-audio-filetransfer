@@ -41,10 +41,16 @@ function addLog(message, level = 'INFO') {
 
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
 
-    entry.innerHTML = `
-        <span class="log-timestamp">${timestamp}</span>
-        <span class="log-message" style="color: ${level === 'ERROR' ? 'var(--danger)' : 'var(--text-secondary)'}">${message}</span>
-    `;
+    const timestampEl = document.createElement('span');
+    timestampEl.className = 'log-timestamp';
+    timestampEl.textContent = timestamp;
+
+    const messageEl = document.createElement('span');
+    messageEl.className = 'log-message';
+    messageEl.style.color = level === 'ERROR' ? 'var(--danger)' : 'var(--text-secondary)';
+    messageEl.textContent = message;
+
+    entry.append(timestampEl, messageEl);
 
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;

@@ -20,6 +20,7 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 from contextlib import asynccontextmanager
+from dataclasses import fields
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -47,6 +48,8 @@ class AppState:
         self.mode: str = "transmitter"  # "transmitter" or "receiver"
         self.config = ProtocolConfig()
         self.manager: Optional[TransferManager] = None
+        self.active_task: Optional[asyncio.Task] = None
+        self.active_websocket: Optional[WebSocket] = None
         self.audio_manager = AudioDeviceManager()
         self.calibration_result: Optional[CalibrationResult] = None
         self.selected_output_device: Optional[int] = None
@@ -89,7 +92,8 @@ app = FastAPI(
 # CORS - only allow localhost
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:*", "http://localhost:*"],
+    allow_origins=[],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,6 +103,8 @@ app.add_middleware(
 frontend_dir = Path(__file__).parent.parent / "frontend"
 if frontend_dir.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+    app.mount("/css", StaticFiles(directory=str(frontend_dir / "css")), name="css")
+    app.mount("/js", StaticFiles(directory=str(frontend_dir / "js")), name="js")
 
 
 # --- REST Endpoints ---
@@ -109,6 +115,18 @@ async def index():
     if app_state.mode == "receiver":
         return FileResponse(str(frontend_dir / "receiver.html"))
     return FileResponse(str(frontend_dir / "index.html"))
+
+
+@app.get("/transmitter.html")
+async def transmitter_page():
+    """Serve the transmitter dashboard from the local backend."""
+    return FileResponse(str(frontend_dir / "transmitter.html"))
+
+
+@app.get("/receiver.html")
+async def receiver_page():
+    """Serve the receiver dashboard from the local backend."""
+    return FileResponse(str(frontend_dir / "receiver.html"))
 
 
 @app.get("/api/mode")
@@ -176,29 +194,46 @@ async def get_config():
         "frequencies": c.frequencies,
         "fec_overhead": c.fec_overhead,
         "fec_enabled": c.fec_enabled,
+        "fec_algorithm": c.fec_algorithm,
         "encryption_enabled": c.encryption_enabled,
         "compression_enabled": c.compression_enabled,
         "chunk_size": c.chunk_size,
     }
 
 
+def _update_config(updates: dict) -> ProtocolConfig:
+    """Validate and apply supported protocol configuration fields."""
+    allowed = {field.name for field in fields(ProtocolConfig)}
+    unknown = set(updates) - allowed
+    if unknown:
+        raise HTTPException(400, f"Unknown configuration fields: {sorted(unknown)}")
+
+    values = {name: getattr(app_state.config, name) for name in allowed}
+    for name, value in updates.items():
+        if name == "frequencies":
+            value = [int(f) for f in value]
+        elif name in {"sample_rate", "symbol_rate", "bits_per_symbol", "chunk_size", "sync_preamble_symbols", "sync_frequency"}:
+            value = int(value)
+        elif name == "fec_overhead":
+            value = float(value)
+        elif name in {"fec_enabled", "encryption_enabled", "compression_enabled"}:
+            if not isinstance(value, bool):
+                raise HTTPException(400, f"{name} must be a boolean")
+        values[name] = value
+
+    candidate = ProtocolConfig(**values)
+    try:
+        candidate.validate()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    app_state.config = candidate
+    return candidate
+
+
 @app.post("/api/config")
 async def set_config(config: dict):
-    """Update protocol configuration."""
-    c = app_state.config
-    if "symbol_rate" in config:
-        c.symbol_rate = int(config["symbol_rate"])
-    if "fec_overhead" in config:
-        c.fec_overhead = float(config["fec_overhead"])
-    if "frequencies" in config:
-        c.frequencies = [int(f) for f in config["frequencies"]]
-    if "encryption_enabled" in config:
-        c.encryption_enabled = config["encryption_enabled"]
-    if "compression_enabled" in config:
-        c.compression_enabled = config["compression_enabled"]
-    if "chunk_size" in config:
-        c.chunk_size = int(config["chunk_size"])
-
+    """Update current protocol configuration after validation."""
+    _update_config(config)
     return {"status": "updated"}
 
 
@@ -208,6 +243,8 @@ async def select_file(file_path: str):
     path = Path(file_path)
     if not path.exists():
         raise HTTPException(404, "File not found")
+    if not path.is_file():
+        raise HTTPException(400, "Selected path is not a regular file")
 
     app_state.file_path = file_path
     file_size = path.stat().st_size
@@ -232,7 +269,12 @@ async def upload_file(file: UploadFile = File(...)):
     upload_dir = Path(app_state.output_dir) / "audio_transfer_uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = upload_dir / file.filename
+    safe_name = Path(file.filename or "upload.bin").name
+    if safe_name in {"", ".", ".."}:
+        raise HTTPException(400, "Invalid upload filename")
+    file_path = upload_dir / safe_name
+    if file_path.exists():
+        file_path = upload_dir / f"{file_path.stem}_{uuid.uuid4().hex[:8]}{file_path.suffix}"
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -241,10 +283,10 @@ async def upload_file(file: UploadFile = File(...)):
     file_size = len(content)
     file_hash = CryptoEngine.compute_file_hash_streaming(str(file_path))
 
-    app_state.log(f"Uploaded file: {file.filename} ({file_size:,} bytes)")
+    app_state.log(f"Uploaded file: {safe_name} ({file_size:,} bytes)")
 
     return {
-        "filename": file.filename,
+        "filename": safe_name,
         "filesize": file_size,
         "hash": file_hash,
     }
@@ -271,7 +313,7 @@ async def export_log():
 async def set_output_dir(path: str):
     """Set the output directory for received files."""
     p = Path(path)
-    if not p.exists():
+    if not p.exists() or not p.is_dir():
         raise HTTPException(404, "Directory not found")
     app_state.output_dir = str(p)
     return {"output_dir": str(p)}
@@ -329,7 +371,7 @@ async def websocket_control(websocket: WebSocket):
 
             elif action == "configure":
                 params = message.get("params", {})
-                app_state.config.__dict__.update(params)
+                _update_config(params)
                 await websocket.send_json({"type": "config_updated"})
 
             elif action == "play_audio":
@@ -337,7 +379,8 @@ async def websocket_control(websocket: WebSocket):
                 audio_data = message.get("data", [])
                 if audio_data:
                     audio = np.array(audio_data, dtype=np.float32)
-                    app_state.audio_manager.play_audio(
+                    await asyncio.to_thread(
+                        app_state.audio_manager.play_audio,
                         audio,
                         device=app_state.selected_output_device,
                         blocking=False,
@@ -347,7 +390,8 @@ async def websocket_control(websocket: WebSocket):
                 # Measure current audio input level
                 if app_state.audio_manager.is_available():
                     try:
-                        level = app_state.audio_manager.measure_level(
+                        level = await asyncio.to_thread(
+                            app_state.audio_manager.measure_level,
                             duration=0.3,
                             device=app_state.selected_input_device,
                         )
@@ -362,13 +406,20 @@ async def websocket_control(websocket: WebSocket):
 
     except WebSocketDisconnect:
         app_state.log("WebSocket disconnected")
+        await cancel_active_transfer(websocket)
     except Exception as e:
         app_state.log(f"WebSocket error: {e}", "ERROR")
-        await websocket.send_json({"type": "error", "message": str(e)})
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            await cancel_active_transfer(websocket)
 
 
 async def handle_start_transfer(websocket: WebSocket):
     """Handle transfer start request."""
+    if app_state.active_task and not app_state.active_task.done():
+        await websocket.send_json({"type": "error", "message": "A transfer is already running"})
+        return
     if not app_state.file_path:
         await websocket.send_json({"type": "error", "message": "No file selected"})
         return
@@ -387,27 +438,38 @@ async def handle_start_transfer(websocket: WebSocket):
         "filesize": transfer_info.filesize,
     })
 
-    # Run transfer in background
-    asyncio.create_task(
-        run_transmission(websocket, transfer_info)
+    # Run transfer in background and retain the task so cancellation and
+    # concurrent-start checks operate on the actual transfer.
+    app_state.active_websocket = websocket
+    app_state.active_task = asyncio.create_task(
+        run_transmission(websocket, transfer_info, app_state.manager, app_state.file_path)
     )
 
 
-async def run_transmission(websocket: WebSocket, transfer_info):
+async def _safe_send(websocket: WebSocket, message: dict) -> bool:
+    """Send a WebSocket event, returning False if the peer disconnected."""
+    try:
+        await websocket.send_json(message)
+        return True
+    except Exception:
+        return False
+
+
+async def run_transmission(websocket: WebSocket, transfer_info, manager: TransferManager, file_path: str):
     """Run the audio transmission."""
     try:
-        # Read file data
-        with open(app_state.file_path, "rb") as f:
-            file_data = f.read()
+        # Read file data once; the manager uses this buffer for frame creation.
+        with open(file_path, "rb") as f:
+            manager._file_data = f.read()
 
-        app_state.manager._file_data = file_data
-
-        # Start transmission
-        audio_data = app_state.manager.start_transmission()
+        if manager._cancel_requested:
+            return
+        audio_data = manager.start_transmission()
 
         # Send via audio output
         if app_state.audio_manager.is_available():
-            app_state.audio_manager.play_audio(
+            await asyncio.to_thread(
+                app_state.audio_manager.play_audio,
                 audio_data,
                 device=app_state.selected_output_device,
                 blocking=True,
@@ -423,72 +485,111 @@ async def run_transmission(websocket: WebSocket, transfer_info):
                 app_state.config.sample_rate,
             )
 
-            # Process received audio
-            app_state.manager = TransferManager(mode="receiver")
-            app_state.manager.configure(app_state.config)
-            app_state.manager.transfer_info = transfer_info
+            # Process received audio through a separate receiver manager.
+            receiver = TransferManager(mode="receiver")
+            receiver.configure(app_state.config)
+            app_state.manager = receiver
+            await simulate_reception(websocket, audio_received, transfer_info, receiver)
 
-            # Simulate receiving
-            await simulate_reception(websocket, audio_received, transfer_info)
-
-        # Send completion
-        await websocket.send_json({
-            "type": "transfer_complete",
-            "success": True,
-            "message": "Transfer complete",
-        })
-
+        # Hardware playback has no local receiver to verify. Simulated mode
+        # emits its own verified completion event.
+        if app_state.audio_manager.is_available():
+            await websocket.send_json({
+                "type": "transfer_complete",
+                "success": True,
+                "message": "Transfer playback complete",
+            })
         app_state.log("Transfer complete")
 
+    except asyncio.CancelledError:
+        manager.cancel()
+        if app_state.manager is not manager:
+            app_state.manager.cancel()
+        app_state.audio_manager.stop_audio()
+        app_state.log("Transfer task cancelled")
+        raise
     except Exception as e:
-        app_state.log(f"Transfer error: {e}", "ERROR")
-        await websocket.send_json({
-            "type": "error",
-            "message": str(e),
-        })
+        if manager.state is not TransferState.CANCELLED:
+            manager.state = TransferState.ERROR
+            app_state.log(f"Transfer error: {e}", "ERROR")
+            await _safe_send(websocket, {
+                "type": "error",
+                "message": str(e),
+            })
+    finally:
+        current = asyncio.current_task()
+        if app_state.active_task is current:
+            app_state.active_task = None
+            app_state.active_websocket = None
 
 
-async def simulate_reception(websocket, audio_data, transfer_info):
-    """Simulate receiving audio data."""
-    receiver = TransferManager(mode="receiver")
-    receiver.configure(app_state.config)
-    receiver.transfer_info = transfer_info
+async def cancel_active_transfer(websocket: Optional[WebSocket] = None) -> None:
+    """Cancel the active transfer only when owned by the given connection."""
+    if websocket is not None and app_state.active_websocket not in (None, websocket):
+        return
+    task = app_state.active_task
+    if task and not task.done():
+        task.cancel()
+    if app_state.manager:
+        app_state.manager.cancel()
+    app_state.audio_manager.stop_audio()
 
-    # Process in chunks to simulate real-time
-    chunk_size = app_state.config.samples_per_symbol * 100
-    total_chunks = len(audio_data) // chunk_size
+
+async def simulate_reception(websocket, audio_data, transfer_info, receiver=None):
+    """Process simulated audio through the same receiver pipeline as hardware."""
+    receiver = receiver or app_state.manager
+    if receiver is None or receiver.mode != "receiver":
+        raise RuntimeError("receiver manager is not initialized")
+
+    chunk_size = max(1, app_state.config.samples_per_symbol() * 100)
+    total_chunks = (len(audio_data) + chunk_size - 1) // chunk_size
+    completed = False
 
     for i in range(total_chunks):
+        if receiver._cancel_requested:
+            raise asyncio.CancelledError
         start = i * chunk_size
-        end = start + chunk_size
-        chunk = audio_data[start:end]
+        chunk = audio_data[start:start + chunk_size]
+        result = receiver.process_audio_chunk(chunk)
 
-        progress = (i + 1) / total_chunks
-        await websocket.send_json({
+        if not await _safe_send(websocket, {
             "type": "progress",
-            "progress": progress,
-            "frames_received": i,
-            "total_frames": total_chunks,
-            "bytes_received": int(progress * transfer_info.filesize),
+            "progress": (i + 1) / total_chunks,
+            "frames_received": receiver.progress.frames_received,
+            "total_frames": transfer_info.total_chunks + 4,
+            "bytes_received": min(
+                receiver.progress.frames_received * transfer_info.chunk_size,
+                transfer_info.filesize,
+            ),
             "total_bytes": transfer_info.filesize,
-        })
+        }):
+            raise asyncio.CancelledError
 
-        # Small delay to simulate real-time
+        if result and result.get("complete"):
+            completed = True
+            break
         await asyncio.sleep(0.01)
 
-    # Verify file
+    if not completed:
+        raise ValueError("simulated reception ended before the END frame")
+
+    data, verified = receiver.get_received_file()
     app_state.log("Verifying received file...")
-    await websocket.send_json({
+    if not verified:
+        raise ValueError("received file failed SHA-256 verification")
+
+    await _safe_send(websocket, {
         "type": "transfer_complete",
         "success": True,
-        "message": "Simulated transfer complete",
+        "filename": transfer_info.filename,
+        "filesize": len(data),
+        "message": "Simulated transfer complete and verified",
     })
 
 
 async def handle_cancel_transfer(websocket: WebSocket):
     """Handle transfer cancellation."""
-    if app_state.manager:
-        app_state.manager.state = TransferState.CANCELLED
+    await cancel_active_transfer(websocket)
     app_state.log("Transfer cancelled")
     await websocket.send_json({"type": "transfer_cancelled"})
 
@@ -515,7 +616,8 @@ async def handle_calibration(websocket: WebSocket):
 
     # Play calibration signal
     if app_state.audio_manager.is_available():
-        app_state.audio_manager.play_audio(
+        await asyncio.to_thread(
+            app_state.audio_manager.play_audio,
             calibration_signal,
             device=app_state.selected_output_device,
             blocking=True,

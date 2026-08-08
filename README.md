@@ -10,6 +10,28 @@ Transfer files between physically isolated computers using **only sound**. No ne
 - **Zero Telemetry**: No uploads, no external APIs, no cloud services
 - **Keys Never Transmitted**: Passwords/keys stay on each machine
 
+## 🚀 Quick Start — Vercel (No Install Required)
+
+The fastest way to try the app — works entirely in your browser.
+
+### Deploy
+
+1. Go to [vercel.com/new](https://vercel.com/new)
+2. Import the GitHub repo: `gumark/airgapped-audio-filetransfer`
+3. Click **Deploy**
+
+Or drag-and-drop the `frontend/` folder at [vercel.com/drop](https://vercel.com/drop).
+
+### Usage
+
+1. Open the deployed URL on **two different computers**
+2. On Computer A: Click **Transmitter** → select a file → click **Start Transmission**
+3. On Computer B: Click **Receiver** → click **Start Listening**
+4. Position the speaker near the microphone
+5. Wait for transfer to complete — the file downloads automatically
+
+> **Note**: The browser version uses Web Audio API for audio I/O. Works in Chrome, Edge, Firefox, and Safari.
+
 ## 🏗️ Architecture
 
 ```
@@ -27,26 +49,25 @@ TRANSMITTER                              RECEIVER
      │                                       │
      ▼                                       ▼
 ┌─────────┐                          ┌─────────────┐
-│Encrypt  │                          │FEC Decode   │
-└────┬────┘                          └──────┬──────┘
-     │                                       │
-     ▼                                       ▼
-┌─────────┐                          ┌─────────────┐
-│FEC Encode│                         │Decrypt      │
+│FEC      │                          │FEC Decode   │
+│Encode   │                          │             │
 └────┬────┘                          └──────┬──────┘
      │                                       │
      ▼                                       ▼
 ┌─────────┐                          ┌─────────────┐
 │Modulate │                          │Reassemble   │
+│(4-FSK)  │                          │& Verify     │
 └────┬────┘                          └──────┬──────┘
      │                                       │
      ▼                                       ▼
 ┌─────────┐       ))) AIR (((       ┌─────────────┐
-│Speaker  │ ─────────────────────── │  File       │
+│Speaker  │ ─────────────────────── │Microphone   │
 └─────────┘                          └─────────────┘
 ```
 
-## 📦 Installation
+## 📦 Installation — Python Backend (Full Features)
+
+For the complete experience with encryption, calibration, and device selection.
 
 ### Prerequisites
 
@@ -57,45 +78,23 @@ TRANSMITTER                              RECEIVER
 ### Setup
 
 ```bash
-# Clone or download the project
-cd audio-transfer
+# Clone the repository
+git clone https://github.com/gumark/airgapped-audio-filetransfer.git
+cd airgapped-audio-filetransfer
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### Requirements
-
-```
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-websockets==12.0
-numpy==1.26.3
-scipy==1.12.0
-cryptography==42.0.2
-zstandard==0.22.0
-python-multipart==0.0.6
-sounddevice==0.4.6
-reedsolo==1.5.11
-```
-
-## 🚀 Usage
-
-### Starting the Transmitter
+### Run
 
 ```bash
+# On Computer A (Transmitter)
 python run.py --mode transmitter
-```
 
-This opens a browser to `http://127.0.0.1:8000` with the transmitter dashboard.
-
-### Starting the Receiver
-
-```bash
+# On Computer B (Receiver)
 python run.py --mode receiver
 ```
-
-This opens a browser to `http://127.0.0.1:8000` with the receiver dashboard.
 
 ### Command Line Options
 
@@ -113,11 +112,11 @@ Options:
 
 ### Step 1: Setup
 
-1. Install the application on both computers
+1. Install the application on both computers (or use Vercel deployment)
 2. Ensure both computers have speakers and microphones working
 3. Position the computers so the speaker can reach the microphone (typically 1-3 meters apart)
 
-### Step 2: Calibration (Recommended)
+### Step 2: Calibration (Recommended — Python Backend Only)
 
 1. On the **Receiver**, click "Run Calibration"
 2. On the **Transmitter**, the calibration signal will play automatically
@@ -136,7 +135,7 @@ Options:
 **On the Receiver:**
 1. The receiver will automatically detect the incoming signal
 2. Progress will be shown as frames are received
-3. Once complete, verify the file hash matches
+3. Once complete, the file is downloaded automatically
 
 ### Step 4: Verification
 
@@ -170,7 +169,7 @@ Reed-Solomon coding with configurable overhead:
 - **25%**: Default (good balance)
 - **40%**: High redundancy (noisy environments)
 
-### Encryption
+### Encryption (Python Backend Only)
 
 - **None**: No encryption
 - **ChaCha20-Poly1305**: Fast, secure (default)
@@ -186,7 +185,7 @@ Run the test suite:
 python -m pytest tests/ -v
 ```
 
-### Test Coverage
+### Test Coverage (42 tests)
 
 - **Protocol**: Packet serialization, CRC, metadata encoding
 - **Modulation**: FSK modulation/demodulation, symbol encoding
@@ -208,57 +207,61 @@ The test suite includes a simulated audio channel that introduces:
 ## 📁 Project Structure
 
 ```
-audio-transfer/
-├── backend/
-│   ├── __init__.py
-│   ├── api/              # FastAPI backend
+airgapped-audio-filetransfer/
+├── backend/                    # Python backend (full features)
+│   ├── api/                    # FastAPI REST + WebSocket API
 │   │   └── __init__.py
-│   ├── crypto/           # Encryption
+│   ├── crypto/                 # ChaCha20-Poly1305 / AES-256-GCM
 │   │   ├── __init__.py
 │   │   └── encryption.py
-│   ├── devices/          # Audio device management
+│   ├── devices/                # Audio device management
 │   │   ├── __init__.py
 │   │   └── audio.py
-│   ├── dsp/              # Digital Signal Processing
+│   ├── dsp/                    # Digital Signal Processing
 │   │   ├── __init__.py
-│   │   ├── modulation.py
-│   │   ├── demodulation.py
-│   │   ├── synchronization.py
-│   │   ├── spectrum.py
-│   │   ├── calibration.py
-│   │   └── channel.py
-│   ├── fec/              # Forward Error Correction
+│   │   ├── modulation.py       # FSK modulator
+│   │   ├── demodulation.py     # FSK demodulator
+│   │   ├── synchronization.py  # Frame sync detection
+│   │   ├── spectrum.py         # FFT spectrum analyzer
+│   │   ├── calibration.py      # Channel quality measurement
+│   │   └── channel.py          # Simulated noisy channel
+│   ├── fec/                    # Forward Error Correction
 │   │   ├── __init__.py
-│   │   └── reed_solomon.py
-│   ├── protocol/         # Packet structure
+│   │   └── reed_solomon.py     # Reed-Solomon codec
+│   ├── protocol/               # Binary packet protocol
 │   │   ├── __init__.py
-│   │   └── packet.py
-│   └── transfer/         # Transfer management
+│   │   └── packet.py           # Frame structure, CRC-16
+│   └── transfer/               # Transfer orchestration
 │       ├── __init__.py
 │       └── manager.py
-├── frontend/
-│   ├── index.html        # Landing page
-│   ├── transmitter.html  # Transmitter dashboard
-│   ├── receiver.html     # Receiver dashboard
+├── frontend/                   # Web UI (works standalone or with backend)
+│   ├── index.html              # Landing page — select Transmitter/Receiver
+│   ├── transmitter.html        # Transmitter dashboard
+│   ├── receiver.html           # Receiver dashboard
 │   ├── css/
-│   │   └── main.css
+│   │   └── main.css            # Dark theme UI
 │   └── js/
-│       └── main.js
-├── tests/
+│       ├── main.js             # Shared utilities
+│       ├── modem.js            # Browser FSK modem (Web Audio API)
+│       ├── fec.js              # Browser FEC (parity coding)
+│       ├── protocol.js         # Browser packet handling
+│       └── transfer.js         # Browser transfer manager
+├── tests/                      # 42 passing tests
 │   ├── test_protocol.py
 │   ├── test_modulation.py
 │   ├── test_demodulation.py
 │   ├── test_fec.py
 │   ├── test_crypto.py
 │   └── test_end_to_end.py
+├── vercel.json                 # Vercel deployment config
 ├── requirements.txt
-├── run.py
+├── run.py                      # Python backend entry point
 └── README.md
 ```
 
 ## 🔧 Troubleshooting
 
-### No Audio Devices Detected
+### No Audio Devices Detected (Python Backend)
 
 ```bash
 # Check available devices
@@ -279,6 +282,12 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
 2. Verify speakers and microphone are working
 3. Try calibration first
 4. Check the transfer log for errors
+
+### Browser Version Not Working
+
+1. Ensure microphone permission is granted
+2. Use Chrome, Edge, or Firefox (Safari may have limitations)
+3. Check browser console for errors
 
 ## 📊 Performance
 
@@ -315,3 +324,4 @@ Contributions welcome! Areas for improvement:
 - Bidirectional communication
 - Mobile app support
 - Hardware acceleration
+- Full Reed-Solomon FEC in browser version

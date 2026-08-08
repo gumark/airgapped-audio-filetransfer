@@ -26,17 +26,17 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .protocol.packet import ProtocolConfig, FrameType
-from .dsp.modulation import FSKModulator
-from .dsp.demodulation import FSKDemodulator
-from .dsp.synchronization import SyncDetector
-from .dsp.spectrum import SpectrumAnalyzer
-from .dsp.calibration import CalibrationEngine, CalibrationResult
-from .dsp.channel import SimulatedChannel, ChannelParams, create_test_channel
-from .fec.reed_solomon import ReedSolomonFEC
-from .crypto.encryption import CryptoEngine
-from .transfer.manager import TransferManager, TransferState, TransferProgress
-from .devices.audio import AudioDeviceManager
+from ..protocol.packet import ProtocolConfig, FrameType
+from ..dsp.modulation import FSKModulator
+from ..dsp.demodulation import FSKDemodulator
+from ..dsp.synchronization import SyncDetector
+from ..dsp.spectrum import SpectrumAnalyzer
+from ..dsp.calibration import CalibrationEngine, CalibrationResult
+from ..dsp.channel import SimulatedChannel, ChannelParams, create_test_channel
+from ..fec.reed_solomon import ReedSolomonFEC
+from ..crypto.encryption import CryptoEngine
+from ..transfer.manager import TransferManager, TransferState, TransferProgress
+from ..devices.audio import AudioDeviceManager
 
 
 # --- Application State ---

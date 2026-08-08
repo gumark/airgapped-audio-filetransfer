@@ -23,7 +23,7 @@ from enum import Enum
 
 from ..protocol.packet import (
     Frame, FrameType, ProtocolConfig,
-    serialize_frame, deserialize_frame,
+    deserialize_frame,
     encode_metadata_payload, decode_metadata_payload,
     MAGIC, PROTOCOL_VERSION,
 )

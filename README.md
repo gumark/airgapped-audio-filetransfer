@@ -1,13 +1,13 @@
 # Air-Gapped Audio File Transfer System
 
-Transfer files between physically isolated computers using **only sound**. No network, no cables, no Bluetooth — just speakers and microphones.
+Transfer files between physically isolated computers using **sound as the physical transfer channel**. No cables or Bluetooth are required; the Vercel deployment uses the network only to prepare transient audio batches.
 
 ## 🔒 Security
 
-- **100% Air-Gapped**: The only data channel is speaker → air → microphone
-- **No Network Exposure**: Backend binds to `127.0.0.1` only
+- **Audio-only transfer channel**: The file crosses the physical gap through speaker → air → microphone
+- **Local privacy mode**: The Python backend binds to `127.0.0.1`; the Vercel mode necessarily sends transient batches to Vercel
 - **End-to-End Encryption**: Optional ChaCha20-Poly1305 or AES-256-GCM
-- **Zero Telemetry**: No uploads, no external APIs, no cloud services
+- **No persistent file storage**: Vercel receives bounded file batches only to generate transient audio responses
 - **Keys Never Transmitted**: Passwords/keys stay on each machine
 
 ## 🚀 Quick Start — Vercel (No Install Required)
@@ -20,7 +20,7 @@ The fastest way to try the app — works entirely in your browser.
 2. Import the GitHub repo: `gumark/airgapped-audio-filetransfer`
 3. Click **Deploy**
 
-Or drag-and-drop the `frontend/` folder at [vercel.com/drop](https://vercel.com/drop).
+Deploy the repository root, not only the `frontend/` folder, so Vercel includes both the static pages and `api/encode-frame.js`.
 
 ### Usage
 
@@ -30,7 +30,7 @@ Or drag-and-drop the `frontend/` folder at [vercel.com/drop](https://vercel.com/
 4. Position the speaker near the microphone
 5. Wait for transfer to complete — the file downloads automatically
 
-> **Note**: The browser version uses Web Audio API for audio I/O. Works in Chrome, Edge, Firefox, and Safari.
+> **Note**: The browser version uses Web Audio API for audio I/O. On Vercel, the transmitter sends bounded file batches to `/api/encode-frame`; Vercel performs framing/FEC/FSK generation and the browser only plays the returned WAV audio. Works in Chrome, Edge, Firefox, and Safari. The deployed transmitter is intended to pair with the deployed browser receiver; the Python receiver requires matching Reed-Solomon/compression settings.
 
 ## 🏗️ Architecture
 
@@ -38,14 +38,15 @@ Or drag-and-drop the `frontend/` folder at [vercel.com/drop](https://vercel.com/
 TRANSMITTER                              RECEIVER
     │                                        │
     ▼                                        ▼
-┌─────────┐                          ┌─────────────┐
-│  File   │                          │  Microphone │
-└────┬────┘                          └──────┬──────┘
+┌──────────────┐                      ┌─────────────┐
+│ File batches │                      │ Microphone  │
+└──────┬───────┘                      └──────┬──────┘
      │                                       │
      ▼                                       ▼
-┌─────────┐                          ┌─────────────┐
-│ Chunking│                          │Demodulation │
-└────┬────┘                          └──────┬──────┘
+┌──────────────┐                      ┌─────────────┐
+│ Vercel API   │                      │Demodulation │
+│ FEC + FSK    │                      │             │
+└──────┬───────┘                      └──────┬──────┘
      │                                       │
      ▼                                       ▼
 ┌─────────┐                          ┌─────────────┐
@@ -185,7 +186,7 @@ Run the test suite:
 python -m pytest tests/ -v
 ```
 
-### Test Coverage (42 tests)
+### Test Coverage (55 Python tests plus a Node encoder smoke test)
 
 - **Protocol**: Packet serialization, CRC, metadata encoding
 - **Modulation**: FSK modulation/demodulation, symbol encoding
@@ -234,7 +235,9 @@ airgapped-audio-filetransfer/
 │   └── transfer/               # Transfer orchestration
 │       ├── __init__.py
 │       └── manager.py
-├── frontend/                   # Web UI (works standalone or with backend)
+├── api/                        # Vercel server-side FSK encoder
+│   └── encode-frame.js         # Bounded JSON-in / WAV-out function
+├── frontend/                   # Web UI (Vercel static frontend)
 │   ├── index.html              # Landing page — select Transmitter/Receiver
 │   ├── transmitter.html        # Transmitter dashboard
 │   ├── receiver.html           # Receiver dashboard
@@ -246,7 +249,7 @@ airgapped-audio-filetransfer/
 │       ├── fec.js              # Browser FEC (parity coding)
 │       ├── protocol.js         # Browser packet handling
 │       └── transfer.js         # Browser transfer manager
-├── tests/                      # 42 passing tests
+├── tests/                      # Python tests plus Vercel encoder smoke test
 │   ├── test_protocol.py
 │   ├── test_modulation.py
 │   ├── test_demodulation.py
@@ -258,6 +261,16 @@ airgapped-audio-filetransfer/
 ├── run.py                      # Python backend entry point
 └── README.md
 ```
+
+## ☁️ Vercel encoder limits
+
+The Vercel route is intentionally stateless and does not store uploaded files. The browser sends each raw batch as base64 JSON, and the function returns a bounded WAV response. This avoids Vercel's serverless request-body limit for large files, but it means:
+
+- The transmitter needs an internet connection to the deployed Vercel project.
+- Files are sent to Vercel during transmission; do not use this deployment for sensitive files unless the deployment is private and appropriately protected.
+- The public route has no durable rate limiter or account system in this repository. Before production use, protect the Vercel project with Vercel access controls or an authenticated proxy/rate limiter; a bearer token embedded in this static frontend would not be secret.
+- Hashing remains in the browser so the receiver can receive its SHA-256 metadata before audio begins; server-side FEC, framing, and waveform generation are offloaded.
+- Use the browser receiver with the Vercel transmitter. The Vercel path uses optional XOR parity, while the Python receiver only accepts Reed-Solomon FEC when FEC is enabled.
 
 ## 🔧 Troubleshooting
 
@@ -306,7 +319,7 @@ python -c "import sounddevice as sd; print(sd.query_devices())"
 
 ## 🛡️ Security Considerations
 
-1. **Physical Security**: Ensure the transfer environment is secure
+1. **Physical Security**: Ensure the transfer environment is secure; Vercel mode is not network-free because it sends batches to the encoder
 2. **Encryption Keys**: Use strong passwords; keys are never transmitted
 3. **File Verification**: Always verify SHA-256 hash after transfer
 4. **Air-Gap Verification**: Physically verify network cables are disconnected

@@ -62,8 +62,8 @@
                         </select>
                     </div>
                     <div class="setting-row">
-                        <span class="setting-label">Browser FEC Check</span>
-                        <label class="visually-hidden" for="fecOverhead">Browser FEC check</label>
+                        <span class="setting-label">Server FEC Check</span>
+                        <label class="visually-hidden" for="fecOverhead">Server FEC check</label>
                         <select class="setting-select" id="fecOverhead">
                             <option value="0" selected>Disabled (hash verification)</option>
                             <option value="10">10% parity (detection only)</option>
@@ -100,12 +100,13 @@
                 <div class="progress-section" id="idleSection">
                     <div class="progress-title">Ready to Transmit</div>
                     <p class="state-copy">
-                        Select a file and configure settings, then start transmission.
+                        Select a file and configure settings, then start transmission. Use the deployed browser receiver for this server-encoded profile.
                     </p>
                     <div class="action-row action-row-centered">
                         <button class="btn btn-success" id="startBtn" onclick="startTransfer()" disabled>
                             Start transmission
                         </button>
+                        <span class="state-copy" id="encoderNote">Audio encoding runs on the Vercel server.</span>
                     </div>
                 </div>
 
@@ -255,16 +256,7 @@
             const estSeconds = file.size / effectiveRate;
             document.getElementById('estTime').textContent = formatTime(estSeconds);
 
-            // Compute hash in browser
-            const reader = new FileReader();
-            reader.onload = async () => {
-                const data = new Uint8Array(reader.result);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-                document.getElementById('fileHash').textContent = hash.substring(0, 16) + '...';
-            };
-            reader.readAsArrayBuffer(file);
+            document.getElementById('fileHash').textContent = 'Computed at start';
         }
 
         function startTransfer() {
@@ -304,7 +296,8 @@
             // UI update
             document.getElementById('idleSection').style.display = 'none';
             document.getElementById('transmittingSection').style.display = 'block';
-            document.getElementById('txStatus').textContent = 'Encoding...';
+            document.getElementById('txStatus').textContent = 'Server encoding';
+            document.getElementById('encoderNote').textContent = 'The Vercel encoder is preparing the next audio batch.';
 
             const symbolRate = parseInt(document.getElementById('symbolRate').value);
             const fecOverhead = parseInt(document.getElementById('fecOverhead').value);

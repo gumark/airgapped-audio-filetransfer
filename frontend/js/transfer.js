@@ -1,9 +1,10 @@
 /**
  * Browser-based audio transfer manager.
  *
- * Wire format: one 0.5s sync tone, one alternating 32-symbol preamble,
- * then contiguous protocol frames. Browser FEC is optional parity checking;
- * the Python backend provides Reed-Solomon correction.
+ * Wire format: one sync tone, one alternating preamble, then contiguous
+ * protocol frames. Transmission framing and FSK waveform generation are
+ * delegated to the Vercel encoder; this browser class retains microphone
+ * reception for the browser receiver.
  */
 
 class BrowserTransferManager {
@@ -45,6 +46,7 @@ class BrowserTransferManager {
         this.onError = null;
         this.onLog = null;
         this.onCountdown = null;
+        this.encoderAbortController = null;
     }
 
     async initAudio(requestedSampleRate = 48000) {
@@ -123,30 +125,73 @@ class BrowserTransferManager {
         return audio;
     }
 
+    async requestEncodedAudio(action, body, signal) {
+        const endpoint = window.AUDIO_ENCODER_URL || '/api/encode-frame';
+        const headers = { 'Content-Type': 'application/json' };
+        if (window.AUDIO_ENCODER_TOKEN) {
+            headers.Authorization = `Bearer ${window.AUDIO_ENCODER_TOKEN}`;
+        }
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ action, ...body }),
+            signal
+        });
+        if (!response.ok) {
+            let message = `Server encoder returned HTTP ${response.status}`;
+            try {
+                const details = await response.json();
+                if (details.error) message = details.error;
+            } catch (_) {
+                // Keep the HTTP status when the response is not JSON.
+            }
+            throw new Error(message);
+        }
+        return response.arrayBuffer();
+    }
+
+    async decodeEncodedAudio(wavData) {
+        return this.audioContext.decodeAudioData(wavData);
+    }
+
+    playAudioBuffer(audioBuffer) {
+        return new Promise((resolve, reject) => {
+            try {
+                const source = this.audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(this.audioContext.destination);
+                source.onended = resolve;
+                source.start();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
     async startTransmission(file, options = {}) {
         try {
             await this.initAudio(options.sampleRate || 48000);
             this.cancelled = false;
+            this.encoderAbortController = new AbortController();
             if (this.audioContext.sampleRate !== (options.sampleRate || 48000)) {
                 throw new Error(`Audio sample rate ${this.audioContext.sampleRate} Hz does not match requested wire rate`);
             }
             const symbolRate = options.symbolRate || 250;
             const frequencies = options.frequencies || [1200, 1600, 2000, 2400];
-            const fecOverhead = Number(options.fecOverhead || 0);
+            const fecOverhead = Number(options.fecOverhead || 0) / 100;
             const fecEnabled = fecOverhead > 0;
-            this.initModem(this.audioContext.sampleRate, symbolRate, frequencies,
-                fecEnabled ? fecOverhead : 0);
+            this.initModem(this.audioContext.sampleRate, symbolRate, frequencies, 0);
             this.selectedFile = file;
             this.state = 'transmitting';
-            this.transferId = Math.floor(Math.random() * 0xFFFFFFFF);
+            this.transferId = 1 + Math.floor(Math.random() * 0xFFFFFFFF);
 
-            this.log('Reading file...');
-            const fileData = await this.readFile(file);
-            this.log('Computing hash...');
-            const fileHash = await this.computeHash(fileData);
+            // Hashing remains local because Web Crypto has no portable
+            // incremental API. The expensive FEC, framing, and waveform
+            // generation happen in the Vercel function below.
+            this.log('Computing file hash...');
+            const fileHash = await this.computeHash(await file.arrayBuffer());
             const chunkSize = 128;
-            const totalChunks = Math.max(1, Math.ceil(fileData.length / chunkSize));
-            const fecAlgorithm = fecEnabled ? 'xor-parity' : 'none';
+            const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
             const metadata = {
                 filename: file.name,
                 filesize: file.size,
@@ -155,80 +200,109 @@ class BrowserTransferManager {
                 totalChunks,
                 hashAlgorithm: 'sha256',
                 fileHash,
-                compressionEnabled: false,
-                encryptionEnabled: false,
-                fecOverhead: fecEnabled ? fecOverhead / 100 : 0,
+                fecOverhead,
                 fecEnabled,
-                fecAlgorithm
+                fecAlgorithm: fecEnabled ? 'xor-parity' : 'none'
             };
-
-            this.log('Encoding frames...');
-            const frames = [];
+            const config = {
+                sampleRate: this.audioContext.sampleRate,
+                symbolRate,
+                frequencies,
+                fecOverhead,
+                fecEnabled,
+                fecAlgorithm: metadata.fecAlgorithm,
+                syncPreambleSymbols: 32,
+                syncFrequency: 1000
+            };
             const totalFrames = totalChunks + 4;
-            frames.push(new Frame(FrameType.SYNC, this.transferId, 0, totalFrames));
-            frames.push(new Frame(FrameType.HANDSHAKE, this.transferId, 0, totalFrames,
-                encodeHandshake({
-                    sampleRate: this.audioContext.sampleRate,
-                    symbolRate,
-                    bitsPerSymbol: Math.log2(frequencies.length),
-                    frequencies,
-                    fecOverhead: metadata.fecOverhead,
-                    fecEnabled,
-                    fecAlgorithm,
-                    syncPreambleSymbols: 32,
-                    syncFrequency: 1000
-                })));
-            frames.push(new Frame(FrameType.METADATA, this.transferId, 0, totalFrames,
-                encodeMetadata(metadata)));
+            const requestBody = { config, metadata, transferId: this.transferId, totalFrames };
+            const signal = this.encoderAbortController.signal;
 
-            for (let i = 0; i < totalChunks; i++) {
-                const chunk = fileData.slice(i * chunkSize, (i + 1) * chunkSize);
-                frames.push(new Frame(FrameType.DATA, this.transferId, i,
-                    totalFrames, this.fec.encode(chunk)));
-            }
-            frames.push(new Frame(FrameType.END, this.transferId, 0, totalFrames));
+            this.log('Preparing audio on the server...');
+            // Fetch the first data batch in parallel with the start prefix so
+            // the initial server round trip does not create a silence gap.
+            const batchChunks = Math.max(1, Math.floor(
+                (8 * symbolRate / 250) /
+                (fecEnabled ? 1 + Math.floor(255 * fecOverhead) / chunkSize : 1)
+            ));
+            const batchSize = batchChunks * chunkSize;
+            const requestDataAudio = async (offset) => {
+                const end = Math.min(offset + batchSize, file.size);
+                const bytes = new Uint8Array(await file.slice(offset, end).arrayBuffer());
+                return this.requestEncodedAudio('data', {
+                    ...requestBody,
+                    sequenceNumber: Math.floor(offset / chunkSize),
+                    chunk: this.bytesToBase64(bytes)
+                }, signal);
+            };
+            const startAudio = this.requestEncodedAudio('start', requestBody, signal)
+                .then(audio => this.decodeEncodedAudio(audio));
+            let pendingAudio = requestDataAudio(0)
+                .then(audio => this.decodeEncodedAudio(audio));
+            await this.playAudioBuffer(await startAudio);
 
-            this.log('Starting in 3 seconds...');
-            for (let i = 3; i >= 1; i--) {
+            this.log(`Transmitting ${totalFrames} frames...`);
+            let offset = 0;
+            for (;;) {
                 if (this.cancelled) return;
-                if (this.onCountdown) this.onCountdown(i);
-                await this.playChunk(this.generateBeep(i === 1 ? 1000 : 600, 0.15));
-                await new Promise(resolve => setTimeout(resolve, 800));
-            }
-
-            this.log('Playing sync tone...');
-            await this.playChunk(this.generateSyncTone(0.5, 1000));
-            await this.playChunk(this.modulator.modulateSymbols(
-                Array.from({ length: 32 }, (_, index) => index % 2)));
-
-            this.log(`Transmitting ${frames.length} frames...`);
-            let dataBytesSent = 0;
-            for (let i = 0; i < frames.length; i++) {
-                if (this.cancelled) return;
-                const frame = frames[i];
-                await this.playChunk(this.modulator.modulateBytes(frame.serialize()));
-                if (frame.type === FrameType.DATA) dataBytesSent += frame.payload.length;
+                const end = Math.min(offset + batchSize, file.size);
+                // Start fetching the next batch while this one is playing. It
+                // avoids adding a network round-trip gap between audio chunks.
+                const nextOffset = end;
+                const hasNext = nextOffset < file.size;
+                const nextAudio = hasNext
+                    ? requestDataAudio(nextOffset).then(audio => this.decodeEncodedAudio(audio))
+                    : null;
+                await this.playAudioBuffer(await pendingAudio);
+                const framesSent = 3 + Math.max(1, Math.ceil(end / chunkSize));
                 if (this.onProgress) {
                     this.onProgress({
-                        progress: (i + 1) / frames.length,
-                        bytesSent: Math.min(dataBytesSent, file.size),
+                        progress: framesSent / totalFrames,
+                        bytesSent: end,
                         totalBytes: file.size,
-                        framesSent: i + 1,
-                        totalFrames: frames.length
+                        framesSent,
+                        totalFrames
                     });
                 }
+                if (!hasNext) break;
+                offset = nextOffset;
+                pendingAudio = nextAudio;
             }
 
+            if (this.cancelled) return;
+            const endAudio = await this.requestEncodedAudio('end', requestBody, signal);
+            await this.playAudioBuffer(await this.decodeEncodedAudio(endAudio));
+            if (this.onProgress) {
+                this.onProgress({
+                    progress: 1,
+                    bytesSent: file.size,
+                    totalBytes: file.size,
+                    framesSent: totalFrames,
+                    totalFrames
+                });
+            }
             this.state = 'complete';
             this.log('Transmission complete!');
             if (this.onComplete) this.onComplete({
                 success: true, filename: file.name, hash: fileHash
             });
         } catch (error) {
+            if (this.cancelled || error.name === 'AbortError') return;
             this.state = 'idle';
             this.log(`Error: ${error.message}`, 'ERROR');
             if (this.onError) this.onError(error);
+        } finally {
+            this.encoderAbortController = null;
         }
+    }
+
+    bytesToBase64(bytes) {
+        let binary = '';
+        const blockSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += blockSize) {
+            binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
+        }
+        return btoa(binary);
     }
 
     async startReceiving(options = {}) {
@@ -539,6 +613,7 @@ class BrowserTransferManager {
     cancel() {
         this.cancelled = true;
         this.state = 'idle';
+        if (this.encoderAbortController) this.encoderAbortController.abort();
         this.finishCapture();
         this.log('Transfer cancelled');
     }

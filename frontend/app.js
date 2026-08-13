@@ -1,49 +1,145 @@
 const mode = new URLSearchParams(location.search).get('mode') || 'transmitter';
 const $ = (id) => document.getElementById(id);
-const state = { file: null, startedAt: 0, lastProgress: 0 };
+const state = { startedAt: 0, lastProgress: 0 };
+const profiles = {
+  MAXIMUM_RELIABILITY: { label: '180 baud', fec: '40% FEC', symbol_rate: 180, fec_overhead: 40 },
+  BALANCED: { label: '300 baud', fec: '25% FEC', symbol_rate: 300, fec_overhead: 25 },
+  MAXIMUM_SPEED: { label: '500 baud', fec: '10% FEC', symbol_rate: 500, fec_overhead: 10 },
+};
 
-function formatBytes(bytes) { if (!Number.isFinite(bytes)) return '—'; const units = ['B','KB','MB','GB','TB']; let i=0; while(bytes >= 1024 && i < units.length-1){bytes/=1024;i++} return `${bytes.toFixed(i ? 2 : 0)} ${units[i]}`; }
-function setMode() {
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit += 1; }
+  return `${bytes.toFixed(unit ? 2 : 0)} ${units[unit]}`;
+}
+
+function escapeHtml(value) {
+  return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, { headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }, ...options });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || 'Request failed');
+  return data;
+}
+
+function configureMode() {
   const receiver = mode === 'receiver';
   $('mode-label').textContent = receiver ? 'RECEIVER' : 'TRANSMITTER';
-  $('page-title').textContent = receiver ? 'Receive through sound' : 'Send through sound';
-  $('file-heading').textContent = receiver ? 'Incoming payload' : 'Choose a file';
-  $('file-panel').classList.toggle('hidden', false);
+  $('page-title').textContent = receiver ? 'Receive a file through sound.' : 'Send a file through sound.';
+  $('page-copy').textContent = receiver ? 'Listen for an encrypted transfer from a nearby computer. Sound is the data channel.' : 'No network connection is used during transfer. Sound is the data channel.';
+  $('file-heading').textContent = receiver ? 'Incoming file' : 'Choose a file';
+  $('file-copy').textContent = receiver ? 'File details appear when a signal is detected.' : 'Files are read locally and streamed in small chunks.';
   $('dropzone').classList.toggle('hidden', receiver);
-  $('selected-file').classList.toggle('hidden', receiver || !state.file);
-  $('security-panel').classList.toggle('hidden', false);
+  $('receiver-empty').classList.toggle('hidden', !receiver);
+  $('clear-file').classList.toggle('hidden', receiver);
   $('start').textContent = receiver ? 'Start listening' : 'Start transmission';
-  $('action-note').textContent = receiver ? 'The microphone is the only data input. Keep both computers physically isolated.' : 'The browser controls this computer only. Files leave through the selected audio device.';
-  if (receiver) { $('file-detail').classList.add('hidden'); $('password-wrap').classList.add('visible'); }
+  $('password-wrap').classList.toggle('hidden', !receiver && !$('encryption').checked);
 }
-async function api(url, options={}) { const response = await fetch(url, {headers:{'Content-Type':'application/json', ...(options.headers||{})}, ...options}); const data = await response.json(); if(!response.ok) throw new Error(data.detail || 'Request failed'); return data; }
-function log(message) { const row = document.createElement('div'); row.textContent = message; $('log').prepend(row); }
+
 function update(data) {
-  const status = data.status || 'READY'; $('status-chip').textContent = status; $('activity-eyebrow').textContent = status === 'TRANSMITTING' || status === 'LISTENING' ? 'TRANSFER IN PROGRESS' : status;
-  $('activity-title').textContent = status === 'COMPLETE' ? 'Transfer complete' : mode === 'receiver' ? (status === 'LISTENING' ? 'Listening for a signal' : 'Ready to receive') : (data.file ? data.file.name : 'Waiting for a payload');
-  const progress = Number(data.progress || 0); $('progress-bar').style.width = `${Math.min(100, progress)}%`; $('progress-percent').textContent = `${progress.toFixed(1)}%`;
-  $('progress-detail').textContent = data.metadata ? `${formatBytes((data.metadata.filesize || 0) * progress / 100)} / ${formatBytes(data.metadata.filesize)}` : (data.message || 'No active transfer');
-  $('frames').textContent = data.frames_total ? `${data.frames_done} / ${data.frames_total}` : '—'; $('recovered').textContent = data.frames_recovered || 0; $('corrupted').textContent = data.frames_corrupted || 0;
-  $('transfer-id').textContent = data.transfer_id ? `ID ${data.transfer_id}` : 'ID —'; $('stop').classList.toggle('hidden', !['TRANSMITTING','LISTENING'].includes(status)); $('start').classList.toggle('hidden', ['TRANSMITTING','LISTENING'].includes(status));
-  if (data.metadata) { $('file-name').textContent = data.metadata.filename; $('file-size').textContent = formatBytes(data.metadata.filesize); $('file-hash').textContent = data.metadata.file_hash || 'verified at completion'; $('selected-file').classList.remove('hidden'); $('dropzone').classList.add('hidden'); }
-  if (data.log && data.log.length) $('log').innerHTML = data.log.slice().reverse().map(item => `<div>${item.replaceAll('&','&amp;').replaceAll('<','&lt;')}</div>`).join('');
-  if (progress > state.lastProgress && state.startedAt) { const elapsed = (Date.now()-state.startedAt)/1000; $('speed').textContent = elapsed ? `${formatBytes((data.metadata?.filesize || 0) * progress / 100 / elapsed)}/s` : '—'; state.lastProgress = progress; }
-  if(status === 'COMPLETE') { $('link-status').textContent = 'Verified successfully'; $('signal-value').textContent = '✓'; $('tone-label').textContent = 'Hash verified'; }
+  const status = data.status || 'READY';
+  const active = ['TRANSMITTING', 'LISTENING'].includes(status);
+  const progress = Number(data.progress || 0);
+  $('status-chip').textContent = status;
+  $('activity-eyebrow').textContent = active ? 'IN PROGRESS' : status;
+  $('activity-title').textContent = status === 'COMPLETE' ? 'Transfer complete' : mode === 'receiver' ? (active ? 'Listening for a signal' : 'Ready to receive') : (data.file?.name || 'Ready to transfer');
+  $('progress-bar').style.width = `${Math.min(100, progress)}%`;
+  $('progress-percent').textContent = `${progress.toFixed(1)}%`;
+  $('progress-detail').textContent = data.metadata ? `${formatBytes((data.metadata.filesize || 0) * progress / 100)} / ${formatBytes(data.metadata.filesize)}` : (data.message || 'Select a file to begin');
+  $('frames').textContent = data.frames_total ? `${data.frames_done} / ${data.frames_total}` : '—';
+  $('recovered').textContent = data.frames_recovered || 0;
+  $('corrupted').textContent = data.frames_corrupted || 0;
+  $('transfer-id').textContent = data.transfer_id ? `ID ${data.transfer_id}` : '—';
+  $('stop').classList.toggle('hidden', !active);
+  $('start').classList.toggle('hidden', active);
+
+  if (data.metadata) {
+    $('file-name').textContent = data.metadata.filename;
+    $('file-size').textContent = formatBytes(data.metadata.filesize);
+    $('file-hash').textContent = data.metadata.file_hash || 'Verified at completion';
+    $('selected-file').classList.remove('hidden');
+    $('receiver-empty').classList.add('hidden');
+    $('file-detail').classList.remove('hidden');
+  }
+  if (data.log?.length) $('log').innerHTML = data.log.slice().reverse().map((item) => `<div>${escapeHtml(item)}</div>`).join('');
+  if (progress > state.lastProgress && state.startedAt) state.lastProgress = progress;
+  if (status === 'COMPLETE') $('progress-detail').textContent = 'Hash verified';
 }
+
 async function upload(file) {
-  state.file = file; $('file-name').textContent = file.name; $('file-size').textContent = formatBytes(file.size); $('selected-file').classList.remove('hidden'); $('dropzone').classList.add('hidden'); $('file-detail').classList.remove('hidden');
-  $('file-hash').textContent = 'computed by the streaming backend before transmission';
-  const form = new FormData(); form.append('file', file); const response = await fetch('/api/upload', {method:'POST', body:form}); if(!response.ok) throw new Error('Could not store file locally'); update(await response.json());
+  $('file-name').textContent = file.name;
+  $('file-size').textContent = formatBytes(file.size);
+  $('selected-file').classList.remove('hidden');
+  $('dropzone').classList.add('hidden');
+  $('file-detail').classList.remove('hidden');
+  $('file-hash').textContent = 'Calculated by the backend before transmission';
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/upload', { method: 'POST', body: form });
+  if (!response.ok) throw new Error('Could not store the file locally');
+  update(await response.json());
 }
-$('choose-file').onclick = () => $('file-input').click(); $('file-input').onchange = e => e.target.files[0] && upload(e.target.files[0]).catch(e => alert(e.message));
-$('dropzone').ondragover = e => {e.preventDefault(); $('dropzone').style.borderColor='var(--blue)'}; $('dropzone').ondragleave = () => $('dropzone').style.borderColor=''; $('dropzone').ondrop = e => {e.preventDefault(); $('dropzone').style.borderColor=''; const file=e.dataTransfer.files[0]; if(file) upload(file).catch(err=>alert(err.message))};
-$('clear-file').onclick = () => { state.file=null; $('selected-file').classList.add('hidden'); $('file-detail').classList.add('hidden'); $('dropzone').classList.remove('hidden'); };
-$('encryption').onchange = e => $('password-wrap').classList.toggle('visible', e.target.checked || mode === 'receiver');
-$('profile').onchange = e => { $('symbol-rate').textContent = ({MAXIMUM_RELIABILITY:'180 baud',BALANCED:'300 baud',MAXIMUM_SPEED:'500 baud'})[e.target.value]; };
-$('calibrate').onclick = async () => { $('link-status').textContent='Analyzing local audio…'; try { const report=await api('/api/calibrate',{method:'POST',body:JSON.stringify({device:$('device').value})}); $('signal-value').textContent=report.signal_detected?'✓':'—'; $('link-status').textContent=report.reliability==='NONE'?'Ready for calibration':'Reliability: '+report.reliability; $('confidence').textContent=`${Math.round(report.frequency_confidence*100)}%`; $('snr').textContent=`${report.snr_db} dB`; $('link-copy').textContent=report.signal_detected?'Signal looks usable. Keep speakers and microphones aligned.':'Start the link test with both devices positioned nearby.'; } catch(e) { $('link-status').textContent=e.message; } };
-$('start').onclick = async () => { try { state.startedAt=Date.now(); state.lastProgress=0; const options={fec_overhead:Number($('fec').value),compression:$('compression').value,encryption:$('encryption').checked,password:$('password').value,profile:$('profile').value,device:$('device').value}; update(await api('/api/start',{method:'POST',body:JSON.stringify(options)})); } catch(e) { alert(e.message); } };
-$('stop').onclick = () => api('/api/stop',{method:'POST',body:'{}'}).then(update).catch(e=>alert(e.message));
-$('export-log').onclick = async () => { const data=await api('/api/log'); const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='airgap-transfer-log.json'; a.click(); URL.revokeObjectURL(a.href); };
-function draw() { const canvas=$('waveform'), rect=canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1; canvas.width=rect.width*dpr; canvas.height=rect.height*dpr; const ctx=canvas.getContext('2d'); ctx.scale(dpr,dpr); ctx.clearRect(0,0,rect.width,rect.height); ctx.strokeStyle='#dce3ff';ctx.lineWidth=1;ctx.beginPath(); for(let x=0;x<rect.width;x+=18){ctx.moveTo(x,0);ctx.lineTo(x,rect.height)}ctx.stroke(); ctx.strokeStyle='#7890ff';ctx.lineWidth=1.5;ctx.beginPath(); for(let x=0;x<rect.width;x++){const y=rect.height/2+Math.sin(x*.065+Date.now()*.002)*(5+Math.sin(x*.021)*3); x?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.stroke(); requestAnimationFrame(draw); }
-setMode(); draw(); fetch('/api/devices').then(r=>r.json()).then(devices=>{const select=$('device');select.innerHTML='';devices.filter(d=>mode==='receiver'?d.max_input_channels:d.max_output_channels).forEach(d=>{const option=document.createElement('option');option.value=d.index;option.textContent=`${d.name} · ${d.default_sample_rate} Hz`;select.append(option)});if(!select.options.length)select.innerHTML='<option>No PortAudio devices found</option>'}).catch(()=>{});
-const ws = new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`); ws.onmessage=e=>update(JSON.parse(e.data)); ws.onclose=()=>setTimeout(()=>location.reload(),3000);
+
+$('choose-file').onclick = () => $('file-input').click();
+$('file-input').onchange = (event) => event.target.files[0] && upload(event.target.files[0]).catch((error) => alert(error.message));
+$('dropzone').ondragover = (event) => { event.preventDefault(); $('dropzone').classList.add('dragging'); };
+$('dropzone').ondragleave = () => $('dropzone').classList.remove('dragging');
+$('dropzone').ondrop = (event) => { event.preventDefault(); $('dropzone').classList.remove('dragging'); const file = event.dataTransfer.files[0]; if (file) upload(file).catch((error) => alert(error.message)); };
+$('clear-file').onclick = async () => { try { update(await api('/api/clear-file', { method: 'POST', body: '{}' })); $('selected-file').classList.add('hidden'); $('file-detail').classList.add('hidden'); $('dropzone').classList.remove('hidden'); } catch (error) { alert(error.message); } };
+$('encryption').onchange = (event) => { if (mode !== 'receiver') $('password-wrap').classList.toggle('hidden', !event.target.checked); };
+$('profile').onchange = (event) => { const profile = profiles[event.target.value]; $('symbol-rate').textContent = profile.label; $('fec-value').textContent = profile.fec; };
+
+$('calibrate').onclick = async () => {
+  $('link-status').textContent = 'Testing local audio…';
+  $('link-metrics').classList.add('hidden');
+  try {
+    const report = await api('/api/calibrate', { method: 'POST', body: JSON.stringify({ device: $('device').value }) });
+    $('link-status').textContent = report.signal_detected ? `Signal detected · ${report.reliability.toLowerCase()} reliability` : 'No signal detected';
+    $('snr').textContent = `${report.snr_db} dB`;
+    $('confidence').textContent = `${Math.round(report.frequency_confidence * 100)}%`;
+    $('link-metrics').classList.remove('hidden');
+  } catch (error) {
+    $('link-status').textContent = error.message;
+  }
+};
+
+$('start').onclick = async () => {
+  const profile = profiles[$('profile').value];
+  const options = { ...profile, compression: $('compression').value, encryption: $('encryption').checked, password: $('password').value, device: $('device').value };
+  try {
+    state.startedAt = Date.now();
+    state.lastProgress = 0;
+    update(await api('/api/start', { method: 'POST', body: JSON.stringify(options) }));
+  } catch (error) { alert(error.message); }
+};
+$('stop').onclick = () => api('/api/stop', { method: 'POST', body: '{}' }).then(update).catch((error) => alert(error.message));
+$('export-log').onclick = async () => {
+  const data = await api('/api/log');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  link.download = 'airgap-transfer-log.json';
+  link.click();
+  URL.revokeObjectURL(link.href);
+};
+
+configureMode();
+$('profile').dispatchEvent(new Event('change'));
+fetch('/api/devices').then((response) => response.json()).then((devices) => {
+  const select = $('device');
+  select.innerHTML = '';
+  devices.filter((device) => mode === 'receiver' ? device.max_input_channels : device.max_output_channels).forEach((device) => {
+    const option = document.createElement('option');
+    option.value = device.index;
+    option.textContent = `${device.name} · ${device.default_sample_rate} Hz`;
+    select.append(option);
+  });
+  if (!select.options.length) select.innerHTML = '<option value="">No audio devices found</option>';
+}).catch(() => {});
+
+const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+socket.onmessage = (event) => update(JSON.parse(event.data));
+socket.onclose = () => setTimeout(() => location.reload(), 3000);

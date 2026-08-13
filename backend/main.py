@@ -101,6 +101,15 @@ def create_app(mode: str = "transmitter") -> FastAPI:
         state.log(f"File selected: {name}")
         return state.snapshot()
 
+    @app.post("/api/clear-file")
+    async def clear_file() -> dict[str, Any]:
+        if mode != "transmitter":
+            raise HTTPException(400, "file selection is only available in transmitter mode")
+        state.file_path = None
+        state.data.pop("file", None)
+        state.log("File selection cleared")
+        return state.snapshot()
+
     @app.post("/api/calibrate")
     async def calibrate(options: dict[str, Any] | None = None) -> dict[str, Any]:
         options = options or {}

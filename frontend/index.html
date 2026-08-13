@@ -3,44 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Airgap Audio Transfer</title>
+  <title>Airgap — Audio transfer</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
   <div class="app-shell">
-    <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">)))</span><div><strong>Airgap</strong><small>Audio Transfer</small></div></div>
-      <nav>
-        <a class="nav-item active"><span>◈</span> Overview</a>
-        <a class="nav-item"><span>◌</span> Calibration</a>
-        <a class="nav-item"><span>⌁</span> Transfer log</a>
-      </nav>
-      <div class="airgap-card"><span class="status-dot"></span><div><b>AIR-GAPPED</b><small>Control plane: localhost</small></div></div>
-      <div class="sidebar-footer">No cloud services<br>No network data channel</div>
-    </aside>
+    <header class="topbar">
+      <a class="wordmark" href="/">Airgap <span>audio transfer</span></a>
+      <div class="header-status"><span class="status-dot"></span><span id="status-chip">READY</span><span class="separator"></span><span>LOCAL ONLY</span></div>
+    </header>
+
     <main>
-      <header class="topbar"><div><p class="eyebrow" id="mode-label">TRANSMITTER</p><h1 id="page-title">Send through sound</h1></div><div class="top-actions"><span class="chip"><span class="pulse"></span><span id="status-chip">READY</span></span><button class="icon-button" id="export-log" title="Export local log">⇩</button></div></header>
-      <section class="hero-grid">
-        <div class="card file-card" id="file-panel">
-          <div class="card-heading"><div><p class="eyebrow">PAYLOAD</p><h2 id="file-heading">Choose a file</h2></div><span class="card-icon">↥</span></div>
-          <div class="dropzone" id="dropzone"><input id="file-input" type="file" hidden><div class="file-orbit">↑</div><strong>Drop a file here</strong><span>or browse from this computer</span><button class="button secondary" id="choose-file">Select file</button></div>
-          <div class="selected-file hidden" id="selected-file"><div class="file-icon">▤</div><div class="file-meta"><strong id="file-name">—</strong><span id="file-size">—</span></div><button class="text-button" id="clear-file">Remove</button></div>
-          <div class="file-detail hidden" id="file-detail"><span>SHA-256</span><code id="file-hash">calculating locally…</code></div>
+      <div class="page-intro">
+        <p class="eyebrow" id="mode-label">TRANSMITTER</p>
+        <h1 id="page-title">Send a file through sound.</h1>
+        <p id="page-copy">No network connection is used during transfer. Sound is the data channel.</p>
+      </div>
+
+      <section class="workspace" aria-label="Transfer setup">
+        <div class="setup-column">
+          <div class="section-heading"><span class="step">01</span><div><h2 id="file-heading">Choose a file</h2><p id="file-copy">Files are read locally and streamed in small chunks.</p></div></div>
+          <div class="dropzone" id="dropzone">
+            <input id="file-input" type="file" hidden>
+            <p>Drop a file here</p>
+            <span>or</span>
+            <button class="button secondary" id="choose-file" type="button">Choose file</button>
+          </div>
+          <div class="receiver-empty hidden" id="receiver-empty"><span class="receiver-dot"></span><div><strong>Waiting for a transmission</strong><p>Start listening, then begin the transmitter.</p></div></div>
+          <div class="selected-file hidden" id="selected-file"><div class="file-glyph" aria-hidden="true">FILE</div><div class="file-meta"><strong id="file-name">—</strong><span id="file-size">—</span></div><button class="text-button" id="clear-file" type="button">Remove</button></div>
+          <div class="file-detail hidden" id="file-detail"><span>SHA-256</span><code id="file-hash">Calculated before transfer</code></div>
         </div>
-        <div class="card link-card">
-          <div class="card-heading"><div><p class="eyebrow">ACOUSTIC LINK</p><h2>Signal readiness</h2></div><span class="card-icon">⌁</span></div>
-          <div class="signal-summary"><div class="signal-ring"><span id="signal-value">—</span><small>SIGNAL</small></div><div><strong id="link-status">Not calibrated</strong><p id="link-copy">Run a link test before starting. Reliability is preferred over speed.</p></div></div>
-          <div class="metric-row"><span>Detection confidence</span><b id="confidence">—</b></div><div class="metric-row"><span>Estimated SNR</span><b id="snr">—</b></div>
-          <button class="button secondary full" id="calibrate">Run calibration</button>
+
+        <div class="setup-column settings-column">
+          <div class="section-heading"><span class="step">02</span><div><h2>Audio link</h2><p>Use the most reliable profile your room supports.</p></div></div>
+          <label class="field">Audio device<select id="device" class="select"><option>Detecting devices…</option></select></label>
+          <label class="field">Profile<select id="profile" class="select"><option value="MAXIMUM_RELIABILITY">Maximum reliability</option><option value="BALANCED" selected>Balanced</option><option value="MAXIMUM_SPEED">Maximum speed</option></select></label>
+          <div class="link-facts"><span>48 kHz</span><span>4-FSK</span><span id="symbol-rate">300 baud</span><span id="fec-value">25% FEC</span></div>
+          <button class="link-test" id="calibrate" type="button">Test audio link <span aria-hidden="true">→</span></button>
+          <p class="link-result" id="link-status">No link test run</p>
+          <div class="link-metrics hidden" id="link-metrics"><span>SNR <b id="snr">—</b></span><span>Confidence <b id="confidence">—</b></span></div>
+
+          <div class="security-block" id="security-panel">
+            <div class="section-heading compact"><span class="step">03</span><div><h2>Security</h2><p>The password is entered out-of-band.</p></div></div>
+            <label class="switch-row"><span>Encrypt transfer</span><input id="encryption" type="checkbox" checked><i aria-hidden="true"></i></label>
+            <div class="password-wrap" id="password-wrap"><label class="field">Password<input id="password" type="password" autocomplete="off" placeholder="Enter on both computers"></label></div>
+          </div>
         </div>
       </section>
-      <section class="card settings-card">
-        <div class="card-heading"><div><p class="eyebrow">TRANSFER PROFILE</p><h2>Audio settings</h2></div><select id="profile" class="select"><option value="MAXIMUM_RELIABILITY">Maximum reliability</option><option value="BALANCED" selected>Balanced</option><option value="MAXIMUM_SPEED">Maximum speed</option></select></div>
-        <div class="settings-grid"><label>Audio <span>Output / input device</span><select id="device" class="select"><option>Detecting devices…</option></select></label><label>Sample rate <span>Host audio clock</span><b>48,000 Hz</b></label><label>Modulation <span>Robust quadrature FSK</span><b>4-FSK</b></label><label>Symbol rate <span>Conservative default</span><b id="symbol-rate">300 baud</b></label><label>FEC overhead <span>Erasure recovery</span><select id="fec" class="select"><option value="10">10%</option><option value="20">20%</option><option value="25" selected>25%</option><option value="30">30%</option><option value="40">40%</option></select></label><label>Compression <span>Per-chunk, no expansion</span><select id="compression" class="select"><option value="zstd" selected>Zstandard</option><option value="gzip">Gzip</option><option value="none">Off</option></select></label></div>
+
+      <section class="transfer-panel" aria-live="polite">
+        <div class="transfer-head"><div><p class="eyebrow" id="activity-eyebrow">READY</p><h2 id="activity-title">Ready to transfer</h2></div><span class="transfer-id" id="transfer-id">—</span></div>
+        <div class="progress-track"><div id="progress-bar"></div></div>
+        <div class="progress-summary"><strong id="progress-percent">0.0%</strong><span id="progress-detail">Select a file to begin</span></div>
+        <div class="transfer-metrics"><span>Frames <b id="frames">—</b></span><span>Recovered <b id="recovered">0</b></span><span>Corrupted <b id="corrupted">0</b></span></div>
+        <div class="action-row"><button class="button primary" id="start" type="button">Start transmission</button><button class="button stop hidden" id="stop" type="button">Stop</button><button class="text-button export" id="export-log" type="button">Export log</button></div>
       </section>
-      <section class="card security-card" id="security-panel"><div class="security-symbol">♢</div><div><p class="eyebrow">OPTIONAL END-TO-END ENCRYPTION</p><h3>The key never travels through the air</h3><p>Use the same password on both computers, or supply a pre-shared key out-of-band. Audio carries only encrypted ciphertext.</p></div><label class="toggle"><input id="encryption" type="checkbox" checked><span></span></label><div class="password-wrap" id="password-wrap"><label>Password <input id="password" type="password" placeholder="Enter on both computers"></label></div></section>
-      <section class="card progress-card"><div class="card-heading"><div><p class="eyebrow" id="activity-eyebrow">READY TO TRANSFER</p><h2 id="activity-title">Waiting for a payload</h2></div><span class="transfer-id" id="transfer-id">ID —</span></div><div class="progress-track"><div id="progress-bar"></div></div><div class="progress-line"><strong id="progress-percent">0.0%</strong><span id="progress-detail">No active transfer</span></div><div class="telemetry"><div><span>Frames</span><b id="frames">—</b></div><div><span>Speed</span><b id="speed">—</b></div><div><span>Recovered</span><b id="recovered">0</b></div><div><span>Corrupted</span><b id="corrupted">0</b></div></div><div class="visualizer"><canvas id="waveform"></canvas><div class="visual-label">LIVE AUDIO MONITOR <span id="tone-label">Awaiting signal</span></div></div></section>
-      <section class="bottom-grid"><div class="card log-card"><div class="card-heading"><div><p class="eyebrow">LOCAL EVENT LOG</p><h2>Activity</h2></div></div><div id="log" class="log"><span class="muted">Events will appear here.</span></div></div><div class="action-panel"><button class="button primary" id="start">Start transmission</button><button class="button danger hidden" id="stop">Stop</button><p id="action-note">The browser controls this computer only. Files leave through the selected audio device.</p></div></section>
+
+      <details class="events">
+        <summary>Recent events <span>Local log</span></summary>
+        <div id="log" class="log"><span class="muted">No events yet.</span></div>
+      </details>
     </main>
   </div>
   <script src="/static/app.js"></script>

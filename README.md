@@ -132,11 +132,11 @@ A wrong key fails authenticated decryption and the final hash can never pass.
 
 ## Calibration and visualization
 
-The dashboard exposes a link-test panel and displays signal confidence, SNR,
-noise floor, clipping, transfer progress, FEC recovery, local event logs, and a
-lightweight waveform monitor. Keep speakers and microphones aligned, avoid
-automatic OS microphone gain if possible, and prefer Maximum Reliability when
-in doubt.
+The dashboard exposes a compact link-test panel and displays signal
+confidence, SNR, transfer progress, FEC recovery, and local event logs. It does
+not display synthetic waveforms or pretend to provide live spectrum data. Keep
+speakers and microphones aligned, avoid automatic OS microphone gain if
+possible, and prefer Maximum Reliability when in doubt.
 
 ## Development and tests
 

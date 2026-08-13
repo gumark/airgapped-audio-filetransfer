@@ -1,10 +1,5 @@
-"""
-Cryptographic module for authenticated encryption.
+"""Optional authenticated encryption helpers."""
 
-Provides end-to-end encryption using modern algorithms.
-Keys are NEVER transmitted through the audio channel.
-"""
+from .context import CryptoContext, EncryptionInfo, context_from_metadata
 
-from .encryption import CryptoEngine
-
-__all__ = ["CryptoEngine"]
+__all__ = ["CryptoContext", "EncryptionInfo", "context_from_metadata"]

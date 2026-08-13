@@ -1,25 +1,5 @@
-"""
-Protocol layer for the air-gapped audio file transfer system.
+"""Versioned wire protocol for audio transport."""
 
-Defines packet structure, frame types, constants, and serialization.
-"""
+from .frames import Frame, FrameType, decode_frame, encode_frame
 
-from .packet import (
-    FrameType,
-    ProtocolConfig,
-    Frame,
-    deserialize_frame,
-    calculate_crc,
-    MAGIC,
-    PROTOCOL_VERSION,
-)
-
-__all__ = [
-    "FrameType",
-    "ProtocolConfig",
-    "Frame",
-    "deserialize_frame",
-    "calculate_crc",
-    "MAGIC",
-    "PROTOCOL_VERSION",
-]
+__all__ = ["Frame", "FrameType", "decode_frame", "encode_frame"]

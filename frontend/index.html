@@ -1,134 +1,48 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Air-Gapped Audio Transfer</title>
-    <link rel="stylesheet" href="css/main.css">
-    <meta name="description" content="Transfer files between isolated computers using sound with server-assisted encoding">
-    <meta name="theme-color" content="#151515">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Airgap Audio Transfer</title>
+  <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-    <div class="container">
-        <header class="hero">
-            <div class="hero-icon">
-                <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-                    <circle cx="40" cy="40" r="38" stroke="var(--accent)" stroke-width="2" opacity="0.3"/>
-                    <circle cx="40" cy="40" r="28" stroke="var(--accent)" stroke-width="2" opacity="0.5"/>
-                    <circle cx="40" cy="40" r="18" stroke="var(--accent)" stroke-width="2" opacity="0.7"/>
-                    <circle cx="40" cy="40" r="8" fill="var(--accent)"/>
-                    <path d="M20 40 Q30 30, 40 40 Q50 50, 60 40" stroke="var(--accent)" stroke-width="2" fill="none"/>
-                    <path d="M20 35 Q30 25, 40 35 Q50 45, 60 35" stroke="var(--accent)" stroke-width="1.5" fill="none" opacity="0.5"/>
-                    <path d="M20 45 Q30 35, 40 45 Q50 55, 60 45" stroke="var(--accent)" stroke-width="1.5" fill="none" opacity="0.5"/>
-                </svg>
-            </div>
-            <h1>Air-Gapped Audio Transfer</h1>                <p class="subtitle">Transfer files between isolated computers using sound, with server-assisted encoding</p>
-            <div class="security-badge">
-                <span class="badge-icon" aria-hidden="true">◈</span>
-                <span>audio-only transfer · server-assisted encoding</span>
-            </div>
-        </header>
-
-        <div class="mode-selection">
-            <a class="mode-card" href="transmitter.html" onclick="selectMode('transmitter'); return false;">
-                <h2>Transmitter</h2>
-                <p>Select a file and broadcast it through your speaker</p>
-                <div class="mode-features">
-                    <span>File selection</span>
-                    <span>Audio output</span>
-                    <span>Real-time stats</span>
-                </div>
-                <span class="btn btn-primary">Configure transmitter</span>
-            </a>
-
-            <div class="mode-divider">
-                <div class="divider-line"></div>
-                <span>OR</span>
-                <div class="divider-line"></div>
-            </div>
-
-            <a class="mode-card" href="receiver.html" onclick="selectMode('receiver'); return false;">
-                <h2>Receiver</h2>
-                <p>Listen with your microphone and reconstruct the file</p>
-                <div class="mode-features">
-                    <span>File reception</span>
-                    <span>Audio input</span>
-                    <span>Verification</span>
-                </div>
-                <span class="btn btn-secondary">Configure receiver</span>
-            </a>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">)))</span><div><strong>Airgap</strong><small>Audio Transfer</small></div></div>
+      <nav>
+        <a class="nav-item active"><span>◈</span> Overview</a>
+        <a class="nav-item"><span>◌</span> Calibration</a>
+        <a class="nav-item"><span>⌁</span> Transfer log</a>
+      </nav>
+      <div class="airgap-card"><span class="status-dot"></span><div><b>AIR-GAPPED</b><small>Control plane: localhost</small></div></div>
+      <div class="sidebar-footer">No cloud services<br>No network data channel</div>
+    </aside>
+    <main>
+      <header class="topbar"><div><p class="eyebrow" id="mode-label">TRANSMITTER</p><h1 id="page-title">Send through sound</h1></div><div class="top-actions"><span class="chip"><span class="pulse"></span><span id="status-chip">READY</span></span><button class="icon-button" id="export-log" title="Export local log">⇩</button></div></header>
+      <section class="hero-grid">
+        <div class="card file-card" id="file-panel">
+          <div class="card-heading"><div><p class="eyebrow">PAYLOAD</p><h2 id="file-heading">Choose a file</h2></div><span class="card-icon">↥</span></div>
+          <div class="dropzone" id="dropzone"><input id="file-input" type="file" hidden><div class="file-orbit">↑</div><strong>Drop a file here</strong><span>or browse from this computer</span><button class="button secondary" id="choose-file">Select file</button></div>
+          <div class="selected-file hidden" id="selected-file"><div class="file-icon">▤</div><div class="file-meta"><strong id="file-name">—</strong><span id="file-size">—</span></div><button class="text-button" id="clear-file">Remove</button></div>
+          <div class="file-detail hidden" id="file-detail"><span>SHA-256</span><code id="file-hash">calculating locally…</code></div>
         </div>
-
-        <div class="how-it-works">
-            <h2>How It Works</h2>
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h3>File → Audio</h3>
-                        <p>The transmitter encodes your file into audio frequencies using FSK modulation</p>
-                    </div>
-                </div>
-                <div class="step-arrow">→</div>
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h3>Speaker → Air → Mic</h3>
-                        <p>Sound carries the payload between the two machines</p>
-                    </div>
-                </div>
-                <div class="step-arrow">→</div>
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Audio → File</h3>
-                        <p>The receiver demodulates the audio and reconstructs the original file</p>
-                    </div>
-                </div>
-            </div>
+        <div class="card link-card">
+          <div class="card-heading"><div><p class="eyebrow">ACOUSTIC LINK</p><h2>Signal readiness</h2></div><span class="card-icon">⌁</span></div>
+          <div class="signal-summary"><div class="signal-ring"><span id="signal-value">—</span><small>SIGNAL</small></div><div><strong id="link-status">Not calibrated</strong><p id="link-copy">Run a link test before starting. Reliability is preferred over speed.</p></div></div>
+          <div class="metric-row"><span>Detection confidence</span><b id="confidence">—</b></div><div class="metric-row"><span>Estimated SNR</span><b id="snr">—</b></div>
+          <button class="button secondary full" id="calibrate">Run calibration</button>
         </div>
-
-        <div class="tech-stack">
-            <div class="tech-item">
-                <span class="tech-label">Encryption</span>
-                <span class="tech-value">AES-256-GCM</span>
-            </div>
-            <div class="tech-item">
-                <span class="tech-label">Error Correction</span>
-                <span class="tech-value">Parity FEC</span>
-            </div>
-            <div class="tech-item">
-                <span class="tech-label">Modulation</span>
-                <span class="tech-value">4-FSK</span>
-            </div>
-            <div class="tech-item">
-                <span class="tech-label">Audio API</span>
-                <span class="tech-value">Web Audio</span>
-            </div>
-        </div>
-
-        <section class="quick-start">
-            <div class="quick-start-heading">
-                <span class="eyebrow">Quick start</span>
-                <h2>Set up two isolated machines.</h2>
-            </div>
-            <p>
-                Use one computer as the transmitter and another as the receiver. Choose a file on the first,
-                allow microphone access on the second, then place the speaker near the microphone.
-            </p>
-            <div class="action-row">
-                <button class="btn btn-primary" onclick="selectMode('transmitter')">Start as transmitter</button>
-                <button class="btn btn-secondary" onclick="selectMode('receiver')">Start as receiver</button>
-            </div>
-        </section>
-    </div>
-
-    <script>
-        function selectMode(mode) {
-            // Store mode and navigate
-            localStorage.setItem('transferMode', mode);
-            window.location.href = mode === 'receiver' ? 'receiver.html' : 'transmitter.html';
-        }
-    </script>
+      </section>
+      <section class="card settings-card">
+        <div class="card-heading"><div><p class="eyebrow">TRANSFER PROFILE</p><h2>Audio settings</h2></div><select id="profile" class="select"><option value="MAXIMUM_RELIABILITY">Maximum reliability</option><option value="BALANCED" selected>Balanced</option><option value="MAXIMUM_SPEED">Maximum speed</option></select></div>
+        <div class="settings-grid"><label>Audio <span>Output / input device</span><select id="device" class="select"><option>Detecting devices…</option></select></label><label>Sample rate <span>Host audio clock</span><b>48,000 Hz</b></label><label>Modulation <span>Robust quadrature FSK</span><b>4-FSK</b></label><label>Symbol rate <span>Conservative default</span><b id="symbol-rate">300 baud</b></label><label>FEC overhead <span>Erasure recovery</span><select id="fec" class="select"><option value="10">10%</option><option value="20">20%</option><option value="25" selected>25%</option><option value="30">30%</option><option value="40">40%</option></select></label><label>Compression <span>Per-chunk, no expansion</span><select id="compression" class="select"><option value="zstd" selected>Zstandard</option><option value="gzip">Gzip</option><option value="none">Off</option></select></label></div>
+      </section>
+      <section class="card security-card" id="security-panel"><div class="security-symbol">♢</div><div><p class="eyebrow">OPTIONAL END-TO-END ENCRYPTION</p><h3>The key never travels through the air</h3><p>Use the same password on both computers, or supply a pre-shared key out-of-band. Audio carries only encrypted ciphertext.</p></div><label class="toggle"><input id="encryption" type="checkbox" checked><span></span></label><div class="password-wrap" id="password-wrap"><label>Password <input id="password" type="password" placeholder="Enter on both computers"></label></div></section>
+      <section class="card progress-card"><div class="card-heading"><div><p class="eyebrow" id="activity-eyebrow">READY TO TRANSFER</p><h2 id="activity-title">Waiting for a payload</h2></div><span class="transfer-id" id="transfer-id">ID —</span></div><div class="progress-track"><div id="progress-bar"></div></div><div class="progress-line"><strong id="progress-percent">0.0%</strong><span id="progress-detail">No active transfer</span></div><div class="telemetry"><div><span>Frames</span><b id="frames">—</b></div><div><span>Speed</span><b id="speed">—</b></div><div><span>Recovered</span><b id="recovered">0</b></div><div><span>Corrupted</span><b id="corrupted">0</b></div></div><div class="visualizer"><canvas id="waveform"></canvas><div class="visual-label">LIVE AUDIO MONITOR <span id="tone-label">Awaiting signal</span></div></div></section>
+      <section class="bottom-grid"><div class="card log-card"><div class="card-heading"><div><p class="eyebrow">LOCAL EVENT LOG</p><h2>Activity</h2></div></div><div id="log" class="log"><span class="muted">Events will appear here.</span></div></div><div class="action-panel"><button class="button primary" id="start">Start transmission</button><button class="button danger hidden" id="stop">Stop</button><p id="action-note">The browser controls this computer only. Files leave through the selected audio device.</p></div></section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
 </body>
 </html>

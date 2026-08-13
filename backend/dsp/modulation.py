@@ -1,153 +1,191 @@
+"""FSK modem.
+
+Four tones encode two bits per symbol. Each frame has a repeated known
+preamble, allowing a receiver to find frames after silence, jitter, or a small
+recording offset. This module only deals with samples and bytes; device I/O is
+kept in ``backend.audio_io``.
 """
-FSK (Frequency Shift Keying) Modulator.
+from __future__ import annotations
 
-Converts digital symbols into audio waveforms suitable for speaker output.
-
-Modulation scheme: M-ary FSK where each symbol maps to a distinct frequency.
-The number of frequencies determines bits_per_symbol = log2(len(frequencies)).
-
-For 4-FSK: frequencies = [f0, f1, f2, f3]
-  symbol 0 → f0, symbol 1 → f1, symbol 2 → f2, symbol 3 → f3
-  Each symbol carries 2 bits.
-
-Audio generation uses continuous-phase FSK to avoid phase discontinuities
-which cause audible clicks and spectral spreading.
-"""
+from dataclasses import dataclass, field
+import math
 
 import numpy as np
-from typing import List, Optional
+
+from backend.protocol.frames import Frame, decode_frame
+
+PREAMBLE = (0, 1, 2, 3) * 6
 
 
-class FSKModulator:
+@dataclass(frozen=True, slots=True)
+class ModemConfig:
+    sample_rate: int = 48_000
+    symbol_rate: int = 300
+    frequencies: tuple[float, float, float, float] = (1200.0, 1800.0, 2400.0, 3000.0)
+    amplitude: float = 0.42
+    # A deliberate quiet interval lets the streaming microphone worker emit
+    # one frame at a time without buffering an entire multi-gigabyte transfer.
+    gap_symbols: float = 32.0
+
+    def __post_init__(self) -> None:
+        if self.sample_rate < 8000 or self.symbol_rate <= 0:
+            raise ValueError("invalid sample or symbol rate")
+        if self.sample_rate / self.symbol_rate < 8:
+            raise ValueError("at least eight samples per symbol are required")
+        if len(self.frequencies) != 4 or len(set(self.frequencies)) != 4:
+            raise ValueError("exactly four distinct FSK frequencies are required")
+        if max(self.frequencies) >= self.sample_rate / 2:
+            raise ValueError("FSK frequencies must be below Nyquist")
+
+    @property
+    def samples_per_symbol(self) -> int:
+        return round(self.sample_rate / self.symbol_rate)
+
+
+def bytes_to_symbols(value: bytes) -> list[int]:
+    return [(byte >> shift) & 3 for byte in value for shift in (6, 4, 2, 0)]
+
+
+def symbols_to_bytes(symbols: list[int]) -> bytes:
+    if len(symbols) % 4:
+        raise ValueError("symbol count must be divisible by four")
+    out = bytearray()
+    for index in range(0, len(symbols), 4):
+        value = 0
+        for symbol in symbols[index : index + 4]:
+            if not 0 <= symbol <= 3:
+                raise ValueError("invalid FSK symbol")
+            value = (value << 2) | symbol
+        out.append(value)
+    return bytes(out)
+
+
+def _tone(config: ModemConfig, frequency: float, length: int, phase: float = 0.0) -> np.ndarray:
+    # A short raised-cosine envelope limits clicks and keeps adjacent frames
+    # from producing broad-band artifacts.
+    t = np.arange(length, dtype=np.float64) / config.sample_rate
+    wave = np.sin(2 * math.pi * frequency * t + phase)
+    ramp = min(length // 8, max(1, config.samples_per_symbol // 8))
+    envelope = np.ones(length)
+    if ramp:
+        envelope[:ramp] = np.linspace(0, 1, ramp, endpoint=False)
+        envelope[-ramp:] = np.linspace(1, 0, ramp, endpoint=False)
+    return wave * envelope * config.amplitude
+
+
+def modulate_bytes(value: bytes, config: ModemConfig = ModemConfig(), *, include_preamble: bool = True) -> np.ndarray:
+    symbols = (list(PREAMBLE) if include_preamble else []) + bytes_to_symbols(value)
+    sps = config.samples_per_symbol
+    pieces = [_tone(config, config.frequencies[symbol], sps) for symbol in symbols]
+    pieces.append(np.zeros(round(sps * config.gap_symbols), dtype=np.float64))
+    return np.concatenate(pieces) if pieces else np.empty(0, dtype=np.float64)
+
+
+def modulate_frame(frame: Frame, config: ModemConfig = ModemConfig()) -> np.ndarray:
+    return modulate_bytes(frame.encode(), config)
+
+
+def modulate_frames(frames: list[Frame], config: ModemConfig = ModemConfig()) -> np.ndarray:
+    if not frames:
+        return np.empty(0, dtype=np.float64)
+    return np.concatenate([modulate_frame(frame, config) for frame in frames])
+
+
+@dataclass(slots=True)
+class DemodulationStats:
+    frames_seen: int = 0
+    frames_decoded: int = 0
+    corrupted_frames: int = 0
+    average_confidence: float = 0.0
+    signal_level: float = 0.0
+
+
+@dataclass(slots=True)
+class DemodulatedResult:
+    frames: list[Frame] = field(default_factory=list)
+    stats: DemodulationStats = field(default_factory=DemodulationStats)
+
+
+def _symbol_observations(samples: np.ndarray, config: ModemConfig, offset: int) -> list[tuple[int, float, float] | None]:
+    sps = config.samples_per_symbol
+    count = (len(samples) - offset) // sps
+    if count <= 0:
+        return []
+    result: list[tuple[int, float, float] | None] = []
+    # Correlation against sine and cosine is a compact Goertzel equivalent and
+    # is stable when a speaker adds a little phase shift.
+    window = np.arange(sps, dtype=np.float64)
+    for index in range(count):
+        segment = samples[offset + index * sps : offset + (index + 1) * sps]
+        powers = []
+        for frequency in config.frequencies:
+            angle = 2 * math.pi * frequency * window / config.sample_rate
+            projection = np.dot(segment, np.cos(angle)) ** 2 + np.dot(segment, np.sin(angle)) ** 2
+            powers.append(float(projection))
+        ordered = sorted(powers, reverse=True)
+        level = math.sqrt(max(0.0, sum(segment * segment) / sps))
+        if ordered[0] < 0.0008 or ordered[0] < ordered[1] * 1.12:
+            result.append(None)
+        else:
+            result.append((int(np.argmax(powers)), ordered[0] / (ordered[1] + 1e-9), level))
+    return result
+
+
+def _matches_preamble(observations: list[tuple[int, float, float] | None], start: int) -> bool:
+    if start + len(PREAMBLE) > len(observations):
+        return False
+    matches = 0
+    for expected, observation in zip(PREAMBLE, observations[start : start + len(PREAMBLE)]):
+        if observation is not None and observation[0] == expected and observation[1] >= 1.12:
+            matches += 1
+    return matches >= len(PREAMBLE) - 2
+
+
+def demodulate_frames(samples: np.ndarray, config: ModemConfig = ModemConfig()) -> DemodulatedResult:
+    """Recover CRC-valid frames from a recording containing one or more frames.
+
+    A few sample offsets are tried to tolerate a recording that starts between
+    symbols. Corrupted frames are discarded at this layer; the FEC layer sees
+    the missing sequence and can reconstruct it.
     """
-    M-ary FSK modulator with continuous-phase waveform generation.
-
-    Configuration:
-        sample_rate: Audio sample rate in Hz (e.g., 48000)
-        frequencies: List of carrier frequencies for each symbol
-        symbol_rate: Symbols per second (baud)
-        amplitude: Output amplitude (0.0 - 1.0)
-    """
-
-    def __init__(
-        self,
-        sample_rate: int = 48000,
-        frequencies: Optional[List[int]] = None,
-        symbol_rate: int = 250,
-        amplitude: float = 0.8,
-    ):
-        self.sample_rate = sample_rate
-        self.frequencies = frequencies or [1200, 1600, 2000, 2400]
-        self.symbol_rate = symbol_rate
-        self.amplitude = amplitude
-
-        # Pre-calculate derived values
-        self.bits_per_symbol = self._compute_bits_per_symbol()
-        self.samples_per_symbol = int(sample_rate / symbol_rate)
-
-    def _compute_bits_per_symbol(self) -> int:
-        """Compute bits carried per symbol from number of frequencies."""
-        n = len(self.frequencies)
-        bits = int(np.log2(n))
-        if 2 ** bits != n:
-            raise ValueError(
-                f"Number of frequencies ({n}) must be a power of 2 for "
-                f"uniform bit mapping. Got {bits} bits."
-            )
-        return bits
-
-    def symbols_to_bytes(self, data: bytes) -> List[int]:
-        """
-        Convert bytes to MSB-first symbols without assuming that the symbol
-        width divides eight. The final symbol is zero-padded when necessary.
-        """
-        mask = (1 << self.bits_per_symbol) - 1
-        symbols = []
-        accumulator = 0
-        bits = 0
-        for byte in data:
-            accumulator = (accumulator << 8) | byte
-            bits += 8
-            while bits >= self.bits_per_symbol:
-                bits -= self.bits_per_symbol
-                symbols.append((accumulator >> bits) & mask)
-                accumulator &= (1 << bits) - 1 if bits else 0
-        if bits:
-            symbols.append((accumulator << (self.bits_per_symbol - bits)) & mask)
-        return symbols
-
-    def bytes_to_symbols(self, data: bytes) -> List[int]:
-        """Alias for symbols_to_bytes."""
-        return self.symbols_to_bytes(data)
-
-    def modulate_symbols(self, symbols: List[int]) -> np.ndarray:
-        """
-        Convert a list of symbols into an audio waveform.
-
-        Uses continuous-phase FSK: the oscillator phase is maintained
-        across symbol boundaries to produce a smooth waveform without
-        clicks or discontinuities.
-
-        Returns:
-            numpy array of float32 audio samples (mono).
-        """
-        samples_per_sym = self.samples_per_symbol
-        total_samples = len(symbols) * samples_per_sym
-        waveform = np.zeros(total_samples, dtype=np.float64)
-
-        phase = 0.0  # Current oscillator phase (radians)
-
-        for i, symbol in enumerate(symbols):
-            freq = self.frequencies[symbol]
-            omega = 2.0 * np.pi * freq / self.sample_rate
-
-            start = i * samples_per_sym
-            end = start + samples_per_sym
-
-            # Generate samples with continuous phase
-            t = np.arange(samples_per_sym, dtype=np.float64)
-            waveform[start:end] = self.amplitude * np.sin(phase + omega * t)
-
-            # Update phase for next symbol (maintain continuity)
-            phase = (phase + omega * samples_per_sym) % (2.0 * np.pi)
-
-        return waveform.astype(np.float32)
-
-    def modulate_bytes(self, data: bytes) -> np.ndarray:
-        """
-        Convenience: convert bytes directly to audio waveform.
-
-        Returns:
-            numpy array of float32 audio samples.
-        """
-        symbols = self.symbols_to_bytes(data)
-        return self.modulate_symbols(symbols)
-
-    def add_preamble(self, waveform: np.ndarray, num_symbols: int = 32) -> np.ndarray:
-        """
-        Add a synchronization preamble to the beginning of a waveform.
-
-        The preamble alternates between the first two frequencies to create
-        a recognizable pattern that the receiver can lock onto.
-        """
-        preamble_symbols = []
-        for i in range(num_symbols):
-            preamble_symbols.append(i % 2)  # Alternate between freq 0 and freq 1
-
-        preamble_wave = self.modulate_symbols(preamble_symbols)
-        return np.concatenate([preamble_wave, waveform])
-
-    def add_sync_tone(self, waveform: np.ndarray, duration: float = 0.5,
-                      frequency: int = 1000) -> np.ndarray:
-        """
-        Add a steady sync tone before the preamble.
-
-        This gives the receiver time to detect that a transmission is starting
-        and to calibrate its automatic gain control.
-        """
-        num_samples = int(self.sample_rate * duration)
-        t = np.arange(num_samples, dtype=np.float64)
-        tone = self.amplitude * 0.5 * np.sin(
-            2.0 * np.pi * frequency * t / self.sample_rate
-        )
-        return np.concatenate([tone.astype(np.float32), waveform])
+    samples = np.asarray(samples, dtype=np.float64).reshape(-1)
+    best: DemodulatedResult | None = None
+    # Searching all offsets is cheap relative to acoustic I/O and handles the
+    # common case where the input callback does not begin on a symbol boundary.
+    for offset in range(config.samples_per_symbol):
+        observations = _symbol_observations(samples, config, offset)
+        result = DemodulatedResult(stats=DemodulationStats(signal_level=float(np.sqrt(np.mean(samples * samples))) if len(samples) else 0.0))
+        index = 0
+        confidence_sum = 0.0
+        while index < len(observations):
+            if not _matches_preamble(observations, index):
+                index += 1
+                continue
+            result.stats.frames_seen += 1
+            body_start = index + len(PREAMBLE)
+            header_symbols = observations[body_start : body_start + 26 * 4]
+            if any(observation is None for observation in header_symbols):
+                result.stats.corrupted_frames += 1
+                index = body_start + 1
+                continue
+            try:
+                header = symbols_to_bytes([observation[0] for observation in header_symbols if observation is not None])
+                payload_length = int.from_bytes(header[22:26], "big")
+                body_bytes = 26 + payload_length + 4
+                body_symbols = observations[body_start : body_start + body_bytes * 4]
+                if len(body_symbols) < body_bytes * 4 or any(observation is None for observation in body_symbols):
+                    raise ValueError("incomplete frame")
+                raw = symbols_to_bytes([observation[0] for observation in body_symbols if observation is not None])
+                frame = decode_frame(raw)
+            except (ValueError, IndexError):
+                result.stats.corrupted_frames += 1
+                index = body_start + 1
+                continue
+            result.frames.append(frame)
+            result.stats.frames_decoded += 1
+            confidence_sum += sum(observation[1] for observation in body_symbols if observation is not None) / len(body_symbols)
+            index = body_start + body_bytes * 4
+        if result.stats.frames_decoded > (best.stats.frames_decoded if best else 0):
+            result.stats.average_confidence = confidence_sum / max(1, result.stats.frames_decoded)
+            best = result
+    return best or DemodulatedResult()

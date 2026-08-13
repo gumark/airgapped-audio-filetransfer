@@ -1,11 +1,5 @@
-"""
-Forward Error Correction (FEC) module.
+"""Reed-Solomon style erasure coding over GF(256)."""
 
-Implements Reed-Solomon coding for error detection and correction
-over the audio channel. This allows the receiver to recover from
-corrupted or missing data without retransmission.
-"""
+from .reed_solomon import ReedSolomon
 
-from .reed_solomon import ReedSolomonFEC
-
-__all__ = ["ReedSolomonFEC"]
+__all__ = ["ReedSolomon"]

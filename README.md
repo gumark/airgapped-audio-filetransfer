@@ -1,340 +1,179 @@
-# Air-Gapped Audio File Transfer System
+# Airgap Audio Transfer
 
-Transfer files between physically isolated computers using **sound as the physical transfer channel**. No cables or Bluetooth are required; the Vercel deployment uses the network only to prepare transient audio batches.
+A local web application for moving arbitrary files between two physically
+isolated computers using the only intended data path:
 
-## 🔒 Security
-
-- **Audio-only transfer channel**: The file crosses the physical gap through speaker → air → microphone
-- **Local privacy mode**: The Python backend binds to `127.0.0.1`; the Vercel mode necessarily sends transient batches to Vercel
-- **End-to-End Encryption**: Optional ChaCha20-Poly1305 or AES-256-GCM
-- **No persistent file storage**: Vercel receives bounded file batches only to generate transient audio responses
-- **Keys Never Transmitted**: Passwords/keys stay on each machine
-
-## 🚀 Quick Start — Vercel (No Install Required)
-
-The fastest way to try the app — works entirely in your browser.
-
-### Deploy
-
-1. Go to [vercel.com/new](https://vercel.com/new)
-2. Import the GitHub repo: `gumark/airgapped-audio-filetransfer`
-3. Click **Deploy**
-
-Deploy the repository root, not only the `frontend/` folder, so Vercel includes both the static pages and `api/encode-frame.js`.
-
-### Usage
-
-1. Open the deployed URL on **two different computers**
-2. On Computer A: Click **Transmitter** → select a file → click **Start Transmission**
-3. On Computer B: Click **Receiver** → click **Start Listening**
-4. Position the speaker near the microphone
-5. Wait for transfer to complete — the file downloads automatically
-
-> **Note**: The browser version uses Web Audio API for audio I/O. On Vercel, the transmitter sends bounded file batches to `/api/encode-frame`; Vercel performs framing/FEC/FSK generation and the browser only plays the returned WAV audio. Works in Chrome, Edge, Firefox, and Safari. The deployed transmitter is intended to pair with the deployed browser receiver; the Python receiver requires matching Reed-Solomon/compression settings.
-
-## 🏗️ Architecture
-
-```
-TRANSMITTER                              RECEIVER
-    │                                        │
-    ▼                                        ▼
-┌──────────────┐                      ┌─────────────┐
-│ File batches │                      │ Microphone  │
-└──────┬───────┘                      └──────┬──────┘
-     │                                       │
-     ▼                                       ▼
-┌──────────────┐                      ┌─────────────┐
-│ Vercel API   │                      │Demodulation │
-│ FEC + FSK    │                      │             │
-└──────┬───────┘                      └──────┬──────┘
-     │                                       │
-     ▼                                       ▼
-┌─────────┐                          ┌─────────────┐
-│FEC      │                          │FEC Decode   │
-│Encode   │                          │             │
-└────┬────┘                          └──────┬──────┘
-     │                                       │
-     ▼                                       ▼
-┌─────────┐                          ┌─────────────┐
-│Modulate │                          │Reassemble   │
-│(4-FSK)  │                          │& Verify     │
-└────┬────┘                          └──────┬──────┘
-     │                                       │
-     ▼                                       ▼
-┌─────────┐       ))) AIR (((       ┌─────────────┐
-│Speaker  │ ─────────────────────── │Microphone   │
-└─────────┘                          └─────────────┘
+```text
+speaker -> air -> microphone
 ```
 
-## 📦 Installation — Python Backend (Full Features)
+The browser is a **control plane only**. It talks to a backend on the same
+computer at `127.0.0.1`. File bytes are never sent to the other computer over
+HTTP, WebSocket, Ethernet, Wi-Fi, Bluetooth, or a cloud service.
 
-For the complete experience with encryption, calibration, and device selection.
+## Status
 
-### Prerequisites
+The core modem and file protocol are implemented and tested end-to-end through
+a simulated noisy channel. The local dashboard supports transmitter and
+receiver operation, device discovery, calibration status, progress telemetry,
+local event-log export, and real PortAudio input/output through `sounddevice`.
 
-- Python 3.10+
-- pip
-- Audio devices (speakers and microphone)
+This is an engineering tool, not a substitute for an independently audited
+high-assurance data diode. Test your own speakers, microphones, room, and
+operating-system audio processing before trusting a transfer.
 
-### Setup
+## Install
+
+Use an environment installed separately on each computer. Package installation
+should be performed before disconnecting the machines from networks.
 
 ```bash
-# Clone the repository
-git clone https://github.com/gumark/airgapped-audio-filetransfer.git
-cd airgapped-audio-filetransfer
-
-# Install dependencies
-pip install -r requirements.txt
+python -m venv .venv
+# Linux/macOS
+. .venv/bin/activate
+# Windows Git Bash
+source .venv/Scripts/activate
+python -m pip install -r requirements.txt
 ```
 
-### Run
+PortAudio is required by `sounddevice`. On Linux, install the distribution's
+PortAudio development/runtime package before installing Python dependencies.
+On Windows and macOS, the `sounddevice` wheel normally supplies what is needed,
+but the OS may still ask for microphone permission.
+
+## Run two isolated computers
+
+### Computer A — transmitter
+
+1. Disable Wi-Fi, Ethernet, Bluetooth, VPNs, and other network interfaces.
+2. Connect speakers/headphones as the output device.
+3. Start the local control plane:
+
+   ```bash
+   python run.py --mode transmitter
+   ```
+
+4. Select a file, choose a profile, run calibration, and enter an out-of-band
+   password if encryption is enabled.
+5. Put the speaker near the receiver microphone and start transmission.
+
+### Computer B — receiver
+
+1. Disable Wi-Fi, Ethernet, Bluetooth, VPNs, and other network interfaces.
+2. Connect or select the microphone that hears Computer A's speaker.
+3. Start the receiver locally:
+
+   ```bash
+   python run.py --mode receiver
+   ```
+
+4. Enter the **same password manually** if the transmitter used password mode.
+   The password is never transmitted through audio.
+5. Start listening before starting the transmitter. The receiver writes to a
+   local `received/` directory by default and only reports success after the
+   SHA-256 file hash is verified.
+
+Use `--port` to run multiple local instances on one development computer; do
+not expose the port beyond localhost.
+
+## Protocol
+
+The data plane is deliberately modular:
+
+```text
+file -> bounded chunks -> optional zstd/gzip -> ChaCha20-Poly1305
+     -> Reed-Solomon parity -> CRC frames -> 4-FSK samples -> speaker
+```
+
+The receiver reverses those stages. The frame header contains:
+
+```text
+magic | protocol version | frame type | transfer id | sequence |
+ total frames | payload length | payload | CRC32
+```
+
+Frame types include `SYNC`, `HANDSHAKE`, `METADATA`, `DATA`, `PARITY`, `END`,
+`ACK`, and `ERROR`. ACK is reserved for a future reverse acoustic channel;
+the current protocol is one-way and does not need TCP/IP retransmission.
+
+### Modem defaults
+
+* 48,000 Hz mono audio
+* 300 baud balanced profile
+* four-frequency FSK at 1,200 / 1,800 / 2,400 / 3,000 Hz
+* 16 KiB source chunks
+* 25% Reed-Solomon parity overhead
+* CRC32 per frame plus final SHA-256
+
+Profiles trade rate for robustness:
+
+| Profile | Baud | FEC | Use |
+| --- | ---: | ---: | --- |
+| Maximum reliability | 180 | 40% | noisy rooms or weak speakers |
+| Balanced | 300 | 25% | default |
+| Maximum speed | 500 | 10% | short, quiet links only |
+
+The receiver treats CRC failures as erasures. Reed-Solomon operates on groups
+of fixed-size encrypted chunk shards, so it can repair missing/corrupted data
+without any network ACK. Only one FEC group is buffered while a file is
+received.
+
+## Encryption
+
+ChaCha20-Poly1305 provides authenticated encryption for each independent
+chunk. Password mode derives a 256-bit key using Argon2id with a random salt
+(`argon2-cffi`; a clearly marked scrypt fallback exists for minimal installs).
+Pre-shared-key mode accepts exactly 32 bytes supplied out-of-band.
+
+The audio metadata can contain a salt and nonce prefix, but never contains the
+password or key. Nonces are derived from the nonce prefix and chunk sequence;
+associated data binds each ciphertext to its transfer ID and sequence number.
+A wrong key fails authenticated decryption and the final hash can never pass.
+
+## Calibration and visualization
+
+The dashboard exposes a link-test panel and displays signal confidence, SNR,
+noise floor, clipping, transfer progress, FEC recovery, local event logs, and a
+lightweight waveform monitor. Keep speakers and microphones aligned, avoid
+automatic OS microphone gain if possible, and prefer Maximum Reliability when
+in doubt.
+
+## Development and tests
+
+The first development phase is independently testable without microphones:
+
+```text
+bytes -> packet frames -> FSK samples -> simulated noisy channel -> FSK
+samples -> frames -> bytes
+```
+
+Run the suite with:
 
 ```bash
-# On Computer A (Transmitter)
-python run.py --mode transmitter
-
-# On Computer B (Receiver)
-python run.py --mode receiver
+python -m pytest -q
 ```
 
-### Command Line Options
+The tests cover frame CRC/versioning, GF(256) Reed-Solomon recovery, actual FSK
+sample demodulation with noise and level changes, authenticated encryption,
+and a streaming file round trip with deliberately erased data frames.
 
+The simulated modem can be extended with timing drift, frequency offset,
+clipping, echoes, and reverberation by transforming the NumPy sample array
+between `modulate_frames` and `demodulate_frames` in
+`tests/test_modulation.py`.
+
+## Project layout
+
+```text
+backend/
+  main.py             localhost FastAPI control plane
+  audio_io.py         local PortAudio device integration
+  protocol/frames.py  versioned frame format and CRC
+  dsp/                FSK modem and calibration
+  fec/                Reed-Solomon erasure coding
+  crypto/             Argon2id and ChaCha20-Poly1305
+  transfer/           bounded-memory file sessions
+frontend/              local dashboard
+run.py                 localhost launcher
+tests/                 simulated and unit tests
 ```
-python run.py --help
-
-Options:
-  --mode {transmitter,receiver}  Run as transmitter or receiver (required)
-  --host HOST                    Host to bind to (default: 127.0.0.1)
-  --port PORT                    Port to listen on (default: 8000)
-  --no-browser                   Don't automatically open browser
-```
-
-## 📡 Transfer Procedure
-
-### Step 1: Setup
-
-1. Install the application on both computers (or use Vercel deployment)
-2. Ensure both computers have speakers and microphones working
-3. Position the computers so the speaker can reach the microphone (typically 1-3 meters apart)
-
-### Step 2: Calibration (Recommended — Python Backend Only)
-
-1. On the **Receiver**, click "Run Calibration"
-2. On the **Transmitter**, the calibration signal will play automatically
-3. Wait for calibration to complete
-4. Review the SNR and recommended settings
-5. The system will automatically adjust settings for optimal reliability
-
-### Step 3: Transfer
-
-**On the Transmitter:**
-1. Select a file
-2. Configure settings (or use calibration recommendations)
-3. Click "Start Transmission"
-4. The file will be transmitted through audio
-
-**On the Receiver:**
-1. The receiver will automatically detect the incoming signal
-2. Progress will be shown as frames are received
-3. Once complete, the file is downloaded automatically
-
-### Step 4: Verification
-
-The receiver verifies:
-- ✓ All frames recovered
-- ✓ File hash (SHA-256) verified
-- ✓ Authentication verified (if encryption enabled)
-- ✓ File reconstructed
-
-## ⚙️ Configuration
-
-### Modulation
-
-- **4-FSK**: 4 frequencies, 2 bits per symbol (default)
-- **Symbol Rate**: 150-500 baud (lower = more reliable)
-
-### Frequency Allocation
-
-Default frequencies (optimized for laptop speakers/microphones):
-```
-Symbol 0 → 1200 Hz
-Symbol 1 → 1600 Hz
-Symbol 2 → 2000 Hz
-Symbol 3 → 2400 Hz
-```
-
-### Forward Error Correction (FEC)
-
-Reed-Solomon coding with configurable overhead:
-- **10%**: Minimal redundancy (clean environments)
-- **25%**: Default (good balance)
-- **40%**: High redundancy (noisy environments)
-
-### Encryption (Python Backend Only)
-
-- **None**: No encryption
-- **ChaCha20-Poly1305**: Fast, secure (default)
-- **AES-256-GCM**: Hardware-accelerated alternative
-
-Key derivation: Argon2id (memory-hard KDF)
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-python -m pytest tests/ -v
-```
-
-### Test Coverage (55 Python tests plus a Node encoder smoke test)
-
-- **Protocol**: Packet serialization, CRC, metadata encoding
-- **Modulation**: FSK modulation/demodulation, symbol encoding
-- **FEC**: Reed-Solomon encoding/decoding, error correction
-- **Crypto**: Encryption/decryption, key derivation
-- **End-to-End**: Full pipeline with simulated channels
-
-### Simulated Channel Tests
-
-The test suite includes a simulated audio channel that introduces:
-- White noise
-- Frequency shifts
-- Symbol corruption
-- Amplitude changes
-- Clipping
-- Timing drift
-- Echoes
-
-## 📁 Project Structure
-
-```
-airgapped-audio-filetransfer/
-├── backend/                    # Python backend (full features)
-│   ├── api/                    # FastAPI REST + WebSocket API
-│   │   └── __init__.py
-│   ├── crypto/                 # ChaCha20-Poly1305 / AES-256-GCM
-│   │   ├── __init__.py
-│   │   └── encryption.py
-│   ├── devices/                # Audio device management
-│   │   ├── __init__.py
-│   │   └── audio.py
-│   ├── dsp/                    # Digital Signal Processing
-│   │   ├── __init__.py
-│   │   ├── modulation.py       # FSK modulator
-│   │   ├── demodulation.py     # FSK demodulator
-│   │   ├── synchronization.py  # Frame sync detection
-│   │   ├── spectrum.py         # FFT spectrum analyzer
-│   │   ├── calibration.py      # Channel quality measurement
-│   │   └── channel.py          # Simulated noisy channel
-│   ├── fec/                    # Forward Error Correction
-│   │   ├── __init__.py
-│   │   └── reed_solomon.py     # Reed-Solomon codec
-│   ├── protocol/               # Binary packet protocol
-│   │   ├── __init__.py
-│   │   └── packet.py           # Frame structure, CRC-16
-│   └── transfer/               # Transfer orchestration
-│       ├── __init__.py
-│       └── manager.py
-├── api/                        # Vercel server-side FSK encoder
-│   └── encode-frame.js         # Bounded JSON-in / WAV-out function
-├── frontend/                   # Web UI (Vercel static frontend)
-│   ├── index.html              # Landing page — select Transmitter/Receiver
-│   ├── transmitter.html        # Transmitter dashboard
-│   ├── receiver.html           # Receiver dashboard
-│   ├── css/
-│   │   └── main.css            # Dark theme UI
-│   └── js/
-│       ├── main.js             # Shared utilities
-│       ├── modem.js            # Browser FSK modem (Web Audio API)
-│       ├── fec.js              # Browser FEC (parity coding)
-│       ├── protocol.js         # Browser packet handling
-│       └── transfer.js         # Browser transfer manager
-├── tests/                      # Python tests plus Vercel encoder smoke test
-│   ├── test_protocol.py
-│   ├── test_modulation.py
-│   ├── test_demodulation.py
-│   ├── test_fec.py
-│   ├── test_crypto.py
-│   └── test_end_to_end.py
-├── vercel.json                 # Vercel deployment config
-├── requirements.txt
-├── run.py                      # Python backend entry point
-└── README.md
-```
-
-## ☁️ Vercel encoder limits
-
-The Vercel route is intentionally stateless and does not store uploaded files. The browser sends each raw batch as base64 JSON, and the function returns a bounded WAV response. This avoids Vercel's serverless request-body limit for large files, but it means:
-
-- The transmitter needs an internet connection to the deployed Vercel project.
-- Files are sent to Vercel during transmission; do not use this deployment for sensitive files unless the deployment is private and appropriately protected.
-- The public route has no durable rate limiter or account system in this repository. Before production use, protect the Vercel project with Vercel access controls or an authenticated proxy/rate limiter; a bearer token embedded in this static frontend would not be secret.
-- Hashing remains in the browser so the receiver can receive its SHA-256 metadata before audio begins; server-side FEC, framing, and waveform generation are offloaded.
-- Use the browser receiver with the Vercel transmitter. The Vercel path uses optional XOR parity, while the Python receiver only accepts Reed-Solomon FEC when FEC is enabled.
-
-## 🔧 Troubleshooting
-
-### No Audio Devices Detected (Python Backend)
-
-```bash
-# Check available devices
-python -c "import sounddevice as sd; print(sd.query_devices())"
-```
-
-### Low SNR / Poor Transfer Quality
-
-1. Reduce distance between speaker and microphone
-2. Minimize background noise
-3. Use lower symbol rate (150 baud)
-4. Increase FEC overhead (40%)
-5. Run calibration to find optimal settings
-
-### Transfer Fails
-
-1. Check that both computers are in "air-gapped" mode (no network audio routing)
-2. Verify speakers and microphone are working
-3. Try calibration first
-4. Check the transfer log for errors
-
-### Browser Version Not Working
-
-1. Ensure microphone permission is granted
-2. Use Chrome, Edge, or Firefox (Safari may have limitations)
-3. Check browser console for errors
-
-## 📊 Performance
-
-### Transfer Speeds
-
-| Symbol Rate | FEC | Effective Speed | Reliability |
-|-------------|-----|-----------------|-------------|
-| 500 baud    | 10% | ~200 B/s        | Lower       |
-| 250 baud    | 25% | ~100 B/s        | Balanced    |
-| 150 baud    | 40% | ~50 B/s         | Higher      |
-
-### Example: 1 MB File
-
-- **At 100 B/s**: ~2.8 hours
-- **At 200 B/s**: ~1.4 hours
-
-## 🛡️ Security Considerations
-
-1. **Physical Security**: Ensure the transfer environment is secure; Vercel mode is not network-free because it sends batches to the encoder
-2. **Encryption Keys**: Use strong passwords; keys are never transmitted
-3. **File Verification**: Always verify SHA-256 hash after transfer
-4. **Air-Gap Verification**: Physically verify network cables are disconnected
-5. **Logging**: Review transfer logs for any anomalies
-
-## 📝 License
-
-This project is provided as-is for educational and security research purposes.
-
-## 🤝 Contributing
-
-Contributions welcome! Areas for improvement:
-- Additional modulation schemes (QPSK, QAM)
-- Faster symbol rates
-- Bidirectional communication
-- Mobile app support
-- Hardware acceleration
-- Full Reed-Solomon FEC in browser version
